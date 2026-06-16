@@ -1,177 +1,259 @@
-import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Dimensions,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   View,
+  Text,
+  Platform,
+  ScrollView,
 } from "react-native";
-import MapView, { Marker, UrlTile } from "react-native-maps"; // Ensure UrlTile is imported
+import MapView from "react-native-map-clustering";
+import { PROVIDER_GOOGLE, Region, Marker } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
+import * as Location from "expo-location";
 
-// Component Imports
-import FuelBottomSheet from "../../components/FuelBottomSheet";
+// Database & Components
+import { getStationsByState } from "../../lib/supabase";
 import FuelMarker from "../../components/FuelMarker";
+import FuelPopupCard from "../../components/FuelPopupCard";
 
 const { width } = Dimensions.get("window");
 
-// Geofence bounding box to keep the user focused purely on Australia
+// Geofence bounding box
 const AUSTRALIA_BOUNDS = {
   latitude: -25.2744,
   longitude: 133.7751,
-  latitudeDelta: 25,
-  longitudeDelta: 25,
+  latitudeDelta: 35,
+  longitudeDelta: 35,
 };
 
-// Mock station coordinates in Melbourne matching our advanced schema profiles
-const MOCK_STATIONS = [
-  {
-    id: "1",
-    latitude: -37.8136,
-    longitude: 144.9631,
-    brand: "reddy",
-    name: "Reddy Express Bundoora",
-    address: "127-132 Plenty Rd & Greenwood Dr, Bundoora VIC 3083",
-    phone: "03 9075 1452",
-    distance: "1.1 km",
-    updatedAt: "1h ago",
-    status: "Open 24/7",
-    prices: [
-      { type: "U91", value: 144.5, active: true },
-      { type: "U95", value: 170.9, active: false },
-      { type: "U98", value: 178.9, active: false },
-      { type: "DIESEL", value: 196.9, active: false },
-      { type: "PremDSL", value: 199.9, active: false },
-      { type: "LPG", value: 98.4, active: false },
-    ],
-  },
-  {
-    id: "2",
-    latitude: -37.815,
-    longitude: 144.97,
-    brand: "bp",
-    name: "BP Central Melbourne",
-    address: "456 Lonsdale St, Melbourne VIC 3000",
-    phone: "03 9600 1234",
-    distance: "2.4 km",
-    updatedAt: "34m ago",
-    status: "Open 24/7",
-    prices: [
-      { type: "U91", value: 162.9, active: true },
-      { type: "U95", value: 174.9, active: false },
-      { type: "U98", value: 182.9, active: false },
-      { type: "DIESEL", value: 194.9, active: false },
-    ],
-  },
-  {
-    id: "3",
-    latitude: -37.81,
-    longitude: 144.955,
-    brand: "ampol",
-    name: "Ampol Carlton",
-    address: "200 Lygon St, Carlton VIC 3053",
-    phone: "03 9347 5566",
-    distance: "1.8 km",
-    updatedAt: "4h ago",
-    status: "Open 6am - Midnight",
-    prices: [
-      { type: "U91", value: 159.9, active: true },
-      { type: "U95", value: 169.9, active: false },
-      { type: "U98", value: 179.9, active: false },
-      { type: "DIESEL", value: 189.9, active: false },
-    ],
-  },
+const STATE_COORDINATES: Record<string, Region> = {
+  NSW: { latitude: -33.8688, longitude: 151.2093, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  VIC: { latitude: -37.8136, longitude: 144.9631, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  QLD: { latitude: -27.4705, longitude: 153.0260, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  WA: { latitude: -31.9505, longitude: 115.8605, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  SA: { latitude: -34.9285, longitude: 138.6007, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  TAS: { latitude: -42.8821, longitude: 147.3272, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  ACT: { latitude: -35.2809, longitude: 149.1300, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+  NT: { latitude: -12.4634, longitude: 130.8456, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+};
+const STATES = Object.keys(STATE_COORDINATES);
+
+// Custom dark mode theme mapped exactly to the provided Google Maps Dark Color Palette and All Fuels blue
+const DARK_MAP_STYLE = [
+  { "elementType": "geometry", "stylers": [{ "color": "#131b26" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#45B2D3" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#131b26" }] },
+  { "featureType": "administrative.locality", "elementType": "labels.text.fill", "stylers": [{ "color": "#45B2D3" }] },
+  { "featureType": "poi", "stylers": [{ "visibility": "off" }] },
+  { "featureType": "transit", "stylers": [{ "visibility": "off" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#153434" }] },
+  { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#1e3b3c" }] },
+  { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#1e3b3c" }] },
+  { "featureType": "road.highway", "elementType": "geometry.stroke", "stylers": [{ "color": "#3a4f63" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0d1117" }] }
 ];
+
+const FUEL_TYPES = ["All fuels", "U91", "U95", "U98", "Diesel", "Premium Diesel", "LPG"];
 
 export default function FuelMapScreen() {
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<any>(null);
 
-  // Track the full station object instead of just an ID string to feed the details panel fluidly
+  const [stations, setStations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<any>(null);
+  const [selectedFuel, setSelectedFuel] = useState("All fuels");
+  const [selectedState, setSelectedState] = useState("NSW");
+  
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownHeight = useSharedValue(0);
+
+  const [isStateDropdownOpen, setIsStateDropdownOpen] = useState(false);
+  const stateDropdownHeight = useSharedValue(0);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") return;
+
+      const location = await Location.getCurrentPositionAsync({});
+      // Ensure mapRef exists before calling animateToRegion
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            latitudeDelta: 0.04,
+            longitudeDelta: 0.04,
+          }, 1000);
+        }
+      }, 500);
+    })();
+  }, []);
+
+  // Automatically fetch the entire state's data when the user switches states.
+  // The clustering library natively handles filtering which markers are actually visible on screen,
+  // drastically improving performance and entirely eliminating the iOS zooming crash!
+  useEffect(() => {
+    (async () => {
+      const data = await getStationsByState(selectedState);
+      console.log(`Fetched ${data?.length || 0} stations for ${selectedState}`);
+      setStations(data || []);
+    })();
+  }, [selectedState]);
+
+  const toggleDropdown = () => {
+    if (isStateDropdownOpen) toggleStateDropdown();
+    const nextState = !isDropdownOpen;
+    setIsDropdownOpen(nextState);
+    dropdownHeight.value = withTiming(nextState ? 280 : 0, { duration: 300 });
+  };
+
+  const toggleStateDropdown = () => {
+    if (isDropdownOpen) toggleDropdown();
+    const nextState = !isStateDropdownOpen;
+    setIsStateDropdownOpen(nextState);
+    stateDropdownHeight.value = withTiming(nextState ? 280 : 0, { duration: 300 });
+  };
+
+  const selectFuel = (fuel: string) => {
+    setSelectedFuel(fuel);
+    toggleDropdown();
+  };
+
+  const selectState = (state: string) => {
+    setSelectedState(state);
+    toggleStateDropdown();
+    
+    // Animate map to the new state
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(STATE_COORDINATES[state], 1000);
+    }
+  };
+
+  const animatedDropdownStyle = useAnimatedStyle(() => ({
+    height: dropdownHeight.value,
+    opacity: dropdownHeight.value > 0 ? withTiming(1) : withTiming(0),
+    overflow: "hidden",
+  }));
+
+  const animatedStateDropdownStyle = useAnimatedStyle(() => ({
+    height: stateDropdownHeight.value,
+    opacity: stateDropdownHeight.value > 0 ? withTiming(1) : withTiming(0),
+    overflow: "hidden",
+    position: 'absolute',
+    right: 0,
+    top: 70,
+  }));
+
+  const mapMarkers = useMemo(() => {
+    return stations
+      .filter((station) => station.latitude && station.longitude)
+      .map((station) => (
+        <Marker
+          key={station.id}
+          coordinate={{ latitude: station.latitude, longitude: station.longitude }}
+          onPress={(e) => {
+            e.stopPropagation();
+            setSelectedStation(station);
+          }}
+        >
+          <FuelMarker
+            station={station}
+            selectedFuel={selectedFuel}
+          />
+        </Marker>
+      ));
+  }, [stations, selectedFuel]);
 
   return (
     <View style={styles.container}>
-      {/* 1. Map Canvas View */}
+      {/* 1. Clustered Map View */}
       <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        customMapStyle={DARK_MAP_STYLE}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={{
-          latitude: -37.8136, // Centered locally on Melbourne for layout validation
-          longitude: 144.9631,
-          latitudeDelta: 0.04,
-          longitudeDelta: 0.04,
+        initialRegion={AUSTRALIA_BOUNDS}
+        minZoomLevel={3.5}
+        radius={80}
+        clusterColor="#45B2D3"
+        clusterTextColor="#131b26"
+        showsUserLocation={true}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        showsPointsOfInterest={false}
+        showsBuildings={false}
+        showsTraffic={false}
+        onPress={() => {
+          setSelectedStation(null);
+          if (isDropdownOpen) toggleDropdown();
+          if (isStateDropdownOpen) toggleStateDropdown();
         }}
-        rotateEnabled={false}
-        pitchEnabled={false}
-        showsUserLocation={false}
-        mapType="none" // Wipes the underlying native map data to block bleed-through text
-        onPress={() => setSelectedStation(null)} // Closes the bottom detail card if user taps empty map space
       >
-        {/* FIX 1: Un-commented and activated clean minimalist tile mapping layer */}
-        <UrlTile
-          urlTemplate="https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
-          maximumZ={19}
-          flipY={false}
-        />
-
-        {/* 2. Custom Station Markers Rendering Loop */}
-        {MOCK_STATIONS.map((station) => {
-          const isSelected = selectedStation?.id === station.id;
-
-          // Pull out the primary active price (usually U91) to show on the map pin badge
-          const primaryPriceNode =
-            station.prices.find((p) => p.active) || station.prices[0];
-
-          return (
-            <Marker
-              key={station.id}
-              coordinate={{
-                latitude: station.latitude,
-                longitude: station.longitude,
-              }}
-              // FIX 2: Intercept gesture tap here and block background map reset event chain
-              onPress={(e) => {
-                e.stopPropagation();
-                setSelectedStation(station);
-              }}
-              // FIX 3: Force view updates to true so custom UI elements intercept tap targets cleanly
-              tracksViewChanges={true}
-            >
-              {/* FIX 4: Block internal custom view sub-components from capturing parent clicks */}
-              <View pointerEvents="none">
-                <FuelMarker
-                  brandKey={station.brand}
-                  price={primaryPriceNode.value}
-                  isSelected={isSelected}
-                />
-              </View>
-            </Marker>
-          );
-        })}
+        {mapMarkers}
       </MapView>
 
-      {/* 3. Floating Modern Header Row Controls Overlay */}
-      <View style={[styles.headerOverlay, { top: insets.top + 10 }]}>
-        <View style={styles.searchBarContainer}>
-          <Ionicons
-            name="search-outline"
-            size={20}
-            color="#7F8C8D"
-            style={styles.searchIcon}
-          />
-          <TextInput
-            placeholder="Search fuel stations..."
-            placeholderTextColor="#95A5A6"
-            style={styles.searchInput}
-          />
+      {/* 2. Floating Modern Header Row */}
+      <View style={[styles.headerOverlay, { top: insets.top + 10 }]} pointerEvents="box-none">
+        <View style={styles.headerRow}>
+          <TouchableOpacity activeOpacity={0.9} style={styles.fuelInfoPill} onPress={toggleDropdown}>
+            <View style={styles.fuelIconContainer}>
+              <MaterialCommunityIcons name="gas-station" size={20} color="#000" />
+            </View>
+            <View style={styles.fuelTextContainer}>
+              <Text style={styles.fuelTitle}>{selectedFuel}</Text>
+              <Text style={styles.fuelSubtitle}>Get petrol diesel gas and more with ease.</Text>
+            </View>
+            <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statePickerButton} activeOpacity={0.9} onPress={toggleStateDropdown}>
+            <Text style={styles.statePickerText}>{selectedState}</Text>
+            <Ionicons name={isStateDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#131b26" />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.filterButton} activeOpacity={0.9}>
-          <Ionicons name="options-outline" size={22} color="#2C3E50" />
-        </TouchableOpacity>
+
+        {/* 3. Animated Dropdown Menus */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', zIndex: 99 }}>
+          {/* Fuel Dropdown */}
+          <Animated.View style={[styles.dropdownContainer, animatedDropdownStyle]}>
+            <ScrollView style={{ flex: 1, width: '100%' }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 8 }}>
+              {FUEL_TYPES.map((fuel) => (
+                <TouchableOpacity key={fuel} style={styles.dropdownItem} onPress={() => selectFuel(fuel)}>
+                  <Text style={[styles.dropdownText, selectedFuel === fuel && styles.dropdownTextSelected]}>
+                    {fuel}
+                  </Text>
+                  {selectedFuel === fuel && <Ionicons name="checkmark-circle" size={20} color="#45B2D3" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Animated.View>
+
+          {/* State Dropdown */}
+          <Animated.View style={[styles.dropdownContainer, animatedStateDropdownStyle, { width: '30%' }]}>
+            <ScrollView style={{ flex: 1, width: '100%' }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 8 }}>
+              {STATES.map((state) => (
+                <TouchableOpacity key={state} style={styles.dropdownItem} onPress={() => selectState(state)}>
+                  <Text style={[styles.dropdownText, selectedState === state && styles.dropdownTextSelected]}>
+                    {state}
+                  </Text>
+                  {selectedState === state && <Ionicons name="checkmark-circle" size={16} color="#45B2D3" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Animated.View>
+        </View>
       </View>
 
-      {/* 4. Advanced Sliding Info Details Drawer Overlay */}
-      <FuelBottomSheet
+      {/* 4. Premium Rounded Top Popup Card */}
+      <FuelPopupCard
         station={selectedStation}
         onClose={() => setSelectedStation(null)}
       />
@@ -180,54 +262,35 @@ export default function FuelMapScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F2F5F8",
+  container: { flex: 1, backgroundColor: "#131b26" },
+  headerOverlay: { position: "absolute", left: 16, right: 16, zIndex: 99 },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  fuelInfoPill: {
+    flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: "#45B2D3",
+    height: 60, borderRadius: 16, paddingHorizontal: 10, marginRight: 12,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5,
   },
-  headerOverlay: {
-    position: "absolute",
-    left: 20,
-    right: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    zIndex: 99, // Ensure headers float high over map elements
+  fuelIconContainer: {
+    width: 40, height: 40, backgroundColor: "#FFFFFF", borderRadius: 12,
+    alignItems: "center", justifyContent: "center", marginRight: 12,
   },
-  searchBarContainer: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    height: 50,
-    borderRadius: 25,
-    paddingHorizontal: 15,
-    marginRight: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 5,
+  fuelTextContainer: { flex: 1, justifyContent: "center" },
+  fuelTitle: { fontSize: 16, fontWeight: "700", color: "#FFFFFF", marginBottom: 2 },
+  fuelSubtitle: { fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: "500" },
+  statePickerButton: {
+    paddingHorizontal: 16, height: 50, backgroundColor: "#FFFFFF", borderRadius: 25,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5,
   },
-  searchIcon: {
-    marginRight: 10,
+  statePickerText: { fontSize: 16, fontWeight: "700", color: "#131b26" },
+  dropdownContainer: {
+    backgroundColor: "#FFFFFF", borderRadius: 16, marginTop: 10, width: "75%",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: "#2C3E50",
-    fontWeight: "500",
+  dropdownItem: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: "#F0F0F0",
   },
-  filterButton: {
-    width: 50,
-    height: 50,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 25,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 5,
-  },
+  dropdownText: { fontSize: 15, color: "#2C3E50", fontWeight: "500" },
+  dropdownTextSelected: { color: "#45B2D3", fontWeight: "700" },
 });

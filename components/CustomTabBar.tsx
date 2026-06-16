@@ -93,7 +93,7 @@ export default function CustomTabBar({ state, navigation }: any) {
       {/* Structural SVG Track Layer */}
       <View style={StyleSheet.absoluteFill}>
         <Svg width={width} height={totalContainerHeight}>
-          <AnimatedPath animatedProps={animatedPathProps} fill="#FFFFFF" />
+          <AnimatedPath animatedProps={animatedPathProps} fill="#45B2D3" />
         </Svg>
       </View>
 
@@ -151,7 +151,7 @@ export default function CustomTabBar({ state, navigation }: any) {
                       : tabInfo.iconOutline) as any
                   }
                   size={22}
-                  color={isFocused ? "#3BCAB7" : "#7F8C8D"}
+                  color={isFocused ? "#FFFFFF" : "rgba(255, 255, 255, 0.6)"}
                 />
                 <Text style={[styles.label, isFocused && styles.activeLabel]}>
                   {tabInfo.label}
@@ -195,12 +195,12 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 9,
-    color: "#7F8C8D",
+    color: "rgba(255, 255, 255, 0.6)",
     fontWeight: "600",
     marginTop: 3,
   },
   activeLabel: {
-    color: "#3BCAB7",
+    color: "#FFFFFF",
     fontWeight: "700",
   },
 });

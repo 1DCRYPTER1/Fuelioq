@@ -6,10 +6,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import SplashScreen from "../components/SplashScreen";
 
 export default function RootLayout() {
-  const [isDesigning, setIsDesigning] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
-  if (isDesigning) {
-    return <SplashScreen />;
+  if (!isReady) {
+    return <SplashScreen onFinish={() => setIsReady(true)} duration={4000} />;
   }
 
   return (

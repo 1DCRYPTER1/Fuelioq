@@ -1,19 +1,101 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { getStationsByState } from "../../lib/supabase";
 
-const STATES = ["NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"];
+const ALL_STATES = ["NSW", "WA", "VIC", "QLD", "SA", "TAS", "ACT", "NT"];
+
+const getBrandColor = (brand: string) => {
+  const lower = brand?.toLowerCase() || "";
+  if (lower.includes('7-eleven')) return '#007A53'; // 7-Eleven Green
+  if (lower.includes('bp')) return '#009900'; // BP Green
+  if (lower.includes('shell') || lower.includes('coles') || lower.includes('reddy')) return '#E31837'; // Shell/Reddy Red
+  if (lower.includes('woolworths') || lower.includes('caltex') || lower.includes('ampol') || lower.includes('eg')) return '#0054A4'; // Ampol Blue
+  if (lower.includes('puma')) return '#1E1E1E';
+  if (lower.includes('united')) return '#0047AB';
+  if (lower.includes('vibe')) return '#FF4500';
+  if (lower.includes('costco')) return '#E31837';
+  return '#45B2D3'; // Default App Blue
+};
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const [selectedState, setSelectedState] = useState("NSW");
+
+  const [activeState, setActiveState] = useState("NSW");
+  const [stations, setStations] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(6);
+
+  const isLiveState = activeState === "NSW" || activeState === "WA";
+
+  useEffect(() => {
+    setVisibleCount(6);
+  }, [activeState, searchQuery]);
+
+  useEffect(() => {
+    if (!isLiveState) {
+      setStations([]);
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      setIsLoading(true);
+      try {
+        const data = await getStationsByState(activeState);
+        if (active) {
+          setStations(data || []);
+        }
+      } catch (err) {
+        console.warn("Failed fetching stations for settings:", err);
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [activeState]);
+
+  // Extract unique brands sorted alphabetically
+  const uniqueBrands = useMemo(() => {
+    const brandSet = new Set<string>();
+    stations.forEach((st) => {
+      if (st.brand) {
+        const formatted = st.brand.trim();
+        if (formatted) brandSet.add(formatted);
+      }
+    });
+    return Array.from(brandSet).sort();
+  }, [stations]);
+
+  // Filter brands based on search query
+  const filteredBrands = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    if (!query) return uniqueBrands;
+    return uniqueBrands.filter(brand => brand.toLowerCase().includes(query));
+  }, [uniqueBrands, searchQuery]);
+
+  // Slice brands for paginated rendering
+  const slicedBrands = useMemo(() => {
+    return filteredBrands.slice(0, visibleCount);
+  }, [filteredBrands, visibleCount]);
+
+  const getBrandStationCount = (brand: string) => {
+    return stations.filter(st => st.brand === brand).length;
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -22,6 +104,136 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scrollContent}>
+        {/* Available Brands Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {isLiveState ? `Available Brands (${uniqueBrands.length})` : "Supported Regions"}
+          </Text>
+
+          {/* Horizontal scroll of all states */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.stateScroll}
+            contentContainerStyle={styles.stateScrollContent}
+          >
+            {ALL_STATES.map((state) => {
+              const isActive = activeState === state;
+              const isLive = state === "NSW" || state === "WA";
+              return (
+                <TouchableOpacity
+                  key={state}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setActiveState(state);
+                    setSearchQuery("");
+                  }}
+                  style={[
+                    styles.stateChip,
+                    isActive && styles.stateChipActive,
+                    !isLive && !isActive && styles.stateChipDisabled,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stateChipText,
+                      isActive && styles.stateChipTextActive,
+                      !isLive && !isActive && styles.stateChipTextDisabled,
+                    ]}
+                  >
+                    {state}
+                  </Text>
+                  {isLive && (
+                    <View style={[styles.liveDot, isActive && styles.liveDotActive]} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {isLiveState ? (
+            <>
+              {/* Search bar */}
+              <View style={styles.searchBar}>
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color="rgba(255, 255, 255, 0.4)"
+                  style={{ marginRight: 8 }}
+                />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search brands (e.g., Ampol, BP)..."
+                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery("")}>
+                    <Ionicons name="close-circle" size={18} color="rgba(255, 255, 255, 0.4)" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {isLoading ? (
+                <View style={styles.loadingWrapper}>
+                  <ActivityIndicator size="small" color="#45B2D3" />
+                  <Text style={styles.loadingText}>Loading brands...</Text>
+                </View>
+              ) : (
+                <View style={styles.brandsContainer}>
+                  {filteredBrands.length === 0 ? (
+                    <Text style={styles.emptyText}>No matching brands found.</Text>
+                  ) : (
+                    <>
+                      <View style={styles.brandGrid}>
+                        {slicedBrands.map((brand) => {
+                          const count = getBrandStationCount(brand);
+                          const color = getBrandColor(brand);
+                          return (
+                            <View key={brand} style={styles.brandCard}>
+                              <View style={[styles.brandColorBar, { backgroundColor: color }]} />
+                              <View style={styles.brandCardContent}>
+                                <Text style={styles.brandNameText} numberOfLines={1}>
+                                  {brand}
+                                </Text>
+                                <Text style={styles.brandCountText}>
+                                  {count} station{count !== 1 ? 's' : ''}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+
+                      {filteredBrands.length > visibleCount && (
+                        <TouchableOpacity
+                          style={styles.viewMoreButton}
+                          activeOpacity={0.8}
+                          onPress={() => setVisibleCount((prev) => prev + 6)}
+                        >
+                          <Text style={styles.viewMoreText}>View More Brands</Text>
+                          <Ionicons name="chevron-down" size={16} color="#45B2D3" />
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.unavailableCard}>
+              <MaterialCommunityIcons name="gas-station-off" size={48} color="#45B2D3" style={{ marginBottom: 12 }} />
+              <Text style={styles.unavailableTitle}>No Stations Available</Text>
+              <Text style={styles.unavailableSubtitle}>
+                We are actively working on adding live fuel pricing datasets for {activeState}. Check back soon!
+              </Text>
+            </View>
+          )}
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Location Preferences</Text>
 
@@ -30,38 +242,7 @@ export default function SettingsScreen() {
               <Text style={styles.label}>Country</Text>
               <View style={styles.disabledInput}>
                 <Text style={styles.disabledInputText}>Australia</Text>
-                <Ionicons name="lock-closed" size={16} color="#A0AAB5" />
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Preferred State</Text>
-              <Text style={styles.subLabel}>
-                Prices will be prioritized for this region.
-              </Text>
-              <View style={styles.chipsContainer}>
-                {STATES.map((state) => (
-                  <TouchableOpacity
-                    key={state}
-                    activeOpacity={0.8}
-                    onPress={() => setSelectedState(state)}
-                    style={[
-                      styles.chip,
-                      selectedState === state && styles.chipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        selectedState === state && styles.chipTextActive,
-                      ]}
-                    >
-                      {state}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                <Ionicons name="lock-closed" size={16} color="rgba(255, 255, 255, 0.4)" />
               </View>
             </View>
           </View>
@@ -82,7 +263,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F2F5F8",
+    backgroundColor: "#131b26",
   },
   header: {
     paddingHorizontal: 20,
@@ -92,7 +273,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 32,
     fontWeight: "800",
-    color: "#2C3E50",
+    color: "#FFFFFF",
   },
   scrollContent: {
     flex: 1,
@@ -104,21 +285,18 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#7F8C8D",
+    color: "#45B2D3",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginBottom: 8,
+    marginBottom: 12,
     marginLeft: 4,
   },
   card: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderRadius: 16,
     padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   inputGroup: {
     paddingVertical: 4,
@@ -126,65 +304,185 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#2C3E50",
+    color: "#FFFFFF",
     marginBottom: 8,
-  },
-  subLabel: {
-    fontSize: 12,
-    color: "#7F8C8D",
-    marginBottom: 12,
-    marginTop: -4,
   },
   disabledInput: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "rgba(255, 255, 255, 0.02)",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "rgba(255, 255, 255, 0.08)",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
   disabledInputText: {
     fontSize: 16,
-    color: "#A0AAB5",
+    color: "rgba(255, 255, 255, 0.6)",
     fontWeight: "500",
   },
-  divider: {
-    height: 1,
-    backgroundColor: "#F0F0F0",
-    marginVertical: 16,
+  stateScroll: {
+    marginBottom: 16,
   },
-  chipsContainer: {
+  stateScrollContent: {
+    gap: 8,
+    paddingRight: 16,
+  },
+  stateChip: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  chip: {
-    backgroundColor: "#F2F5F8",
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 20,
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 6,
   },
-  chipActive: {
+  stateChipActive: {
     backgroundColor: "#45B2D3",
     borderColor: "#45B2D3",
-    shadowColor: "#45B2D3",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
   },
-  chipText: {
-    color: "#7F8C8D",
+  stateChipDisabled: {
+    backgroundColor: "rgba(255, 255, 255, 0.02)",
+    borderColor: "rgba(255, 255, 255, 0.04)",
+    opacity: 0.5,
+  },
+  stateChipText: {
+    color: "rgba(255, 255, 255, 0.7)",
     fontWeight: "600",
-    fontSize: 14,
+    fontSize: 13,
   },
-  chipTextActive: {
+  stateChipTextActive: {
+    color: "#131b26",
+    fontWeight: "700",
+  },
+  stateChipTextDisabled: {
+    color: "rgba(255, 255, 255, 0.3)",
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#2ECC71",
+  },
+  liveDotActive: {
+    backgroundColor: "#131b26",
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 48,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
     color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "500",
+    paddingVertical: 8,
+  },
+  loadingWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  loadingText: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 8,
+  },
+  brandsContainer: {
+    marginBottom: 16,
+  },
+  brandGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 10,
+  },
+  brandCard: {
+    flexDirection: "row",
+    width: "48%",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+    height: 56,
+  },
+  brandColorBar: {
+    width: 5,
+    height: "100%",
+  },
+  brandCardContent: {
+    flex: 1,
+    paddingHorizontal: 10,
+    justifyContent: "center",
+  },
+  brandNameText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  brandCountText: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  unavailableCard: {
+    backgroundColor: "rgba(27, 38, 54, 0.6)",
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.05)",
+    marginVertical: 12,
+  },
+  unavailableTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    marginBottom: 6,
+  },
+  unavailableSubtitle: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.5)",
+    textAlign: "center",
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  emptyText: {
+    color: "rgba(255, 255, 255, 0.3)",
+    fontSize: 14,
+    textAlign: "center",
+    paddingVertical: 30,
+    fontWeight: "500",
+  },
+  viewMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 16,
+    gap: 6,
+  },
+  viewMoreText: {
+    color: "#45B2D3",
+    fontSize: 14,
     fontWeight: "700",
   },
   footer: {
@@ -194,13 +492,13 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 14,
-    color: "#7F8C8D",
+    color: "rgba(255, 255, 255, 0.5)",
     fontWeight: "500",
     marginBottom: 4,
   },
   versionText: {
     fontSize: 12,
-    color: "#BDC3C7",
+    color: "rgba(255, 255, 255, 0.3)",
     fontWeight: "600",
   },
 });

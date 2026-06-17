@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { showLocation } from 'react-native-map-link';
@@ -21,7 +21,7 @@ export default function FuelPopupCard({ station, onClose }: Props) {
   useEffect(() => {
     if (station) {
       setActiveStation(station);
-      translateY.value = withSpring(0, { damping: 22, stiffness: 250 });
+      translateY.value = withTiming(0, { duration: 300 });
     } else {
       translateY.value = withTiming(height, { duration: 250 });
     }
@@ -48,108 +48,141 @@ export default function FuelPopupCard({ station, onClose }: Props) {
 
   if (!activeStation) return null;
 
-  // Formatter for relative time
-  const updatedDate = new Date(activeStation.updated_at);
-  const timeAgo = Math.round((new Date().getTime() - updatedDate.getTime()) / 60000);
-  const timeString = timeAgo < 60 ? `${timeAgo} mins ago` : `${Math.round(timeAgo/60)} hours ago`;
+  try {
+    // Formatter for relative time safely
+    let timeString = 'recently';
+    if (activeStation.updated_at) {
+      const updatedDate = new Date(activeStation.updated_at);
+      if (!isNaN(updatedDate.getTime())) {
+        const timeAgo = Math.round((new Date().getTime() - updatedDate.getTime()) / 60000);
+        timeString = timeAgo < 60 ? `${timeAgo} mins ago` : `${Math.round(timeAgo/60)} hours ago`;
+      }
+    }
 
-  // Mock historical data for the chart (smooth curve)
-  const chartData = [
-    { value: 185 }, { value: 182 }, { value: 180 }, { value: 178 },
-    { value: 184 }, { value: 189 }, { value: 195 }, { value: 199 },
-    { value: Math.max(...(activeStation.prices?.map(p => p.value) || [180])) } // End at current highest price
-  ];
+    // Mock historical data for the chart (smooth curve)
+    const pricesList = Array.isArray(activeStation.prices) ? activeStation.prices : [];
+    const validPriceValues = pricesList
+      .map((p: any) => p && typeof p.value === 'number' ? p.value : null)
+      .filter((v: number | null): v is number => v !== null && v > 0);
+    const maxPrice = validPriceValues.length > 0 ? Math.max(...validPriceValues) : 180;
 
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={station ? "auto" : "none"}>
-      {/* Invisible backdrop to dismiss popup */}
-      {station && (
-        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
-      )}
+    const chartData = [
+      { value: 185 }, { value: 182 }, { value: 180 }, { value: 178 },
+      { value: 184 }, { value: 189 }, { value: 195 }, { value: 199 },
+      { value: maxPrice }
+    ];
 
-      {/* The Floating Card */}
-      <Animated.View style={[styles.card, animatedStyle, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-        
-        {/* Header Section */}
-        <View style={styles.header}>
-          <View style={styles.headerTitleRow}>
-            <View style={styles.logoCircle}>
-              <MaterialCommunityIcons name="gas-station" size={24} color="#131b26" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title} numberOfLines={1}>{activeStation.name}</Text>
-              <Text style={styles.subtitle}>Updated {timeString}</Text>
-            </View>
-          </View>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Ionicons name="close" size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+    return (
+      <View style={StyleSheet.absoluteFill} pointerEvents={station ? "auto" : "none"}>
+        {/* Invisible backdrop to dismiss popup */}
+        {station && (
+          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />
+        )}
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* The Floating Card */}
+        <Animated.View style={[styles.card, animatedStyle, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           
-          {/* Info Rows */}
-          <View style={styles.infoBox}>
-            <View style={styles.infoRow}>
-              <Ionicons name="location-outline" size={20} color="#45B2D3" />
-              <Text style={styles.infoText} numberOfLines={2}>{activeStation.address}</Text>
-            </View>
-            {activeStation.phone && (
-              <View style={[styles.infoRow, { marginTop: 12 }]}>
-                <Ionicons name="call-outline" size={20} color="#45B2D3" />
-                <Text style={styles.infoText}>{activeStation.phone}</Text>
+          {/* Header Section */}
+          <View style={styles.header}>
+            <View style={styles.headerTitleRow}>
+              <View style={styles.logoCircle}>
+                <MaterialCommunityIcons name="gas-station" size={24} color="#131b26" />
               </View>
-            )}
-          </View>
-
-          {/* Current Prices List */}
-          <Text style={styles.sectionTitle}>Live Prices</Text>
-          <View style={styles.pricesGrid}>
-            {activeStation.prices?.map((price: any, i: number) => (
-              <View key={i} style={styles.priceItem}>
-                <Text style={styles.fuelType}>{price.type}</Text>
-                <Text style={styles.fuelPrice}>{price.value.toFixed(1)}<Text style={styles.cents}>¢</Text></Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title} numberOfLines={1}>{activeStation.name}</Text>
+                <Text style={styles.subtitle}>
+                  Updated {timeString} • Source: {activeStation.state === "WA" ? "FuelWatch" : "FuelCheck"}
+                </Text>
               </View>
-            ))}
-          </View>
-
-          {/* Analytics Chart */}
-          <View style={styles.chartContainer}>
-            <Text style={styles.sectionTitle}>Price Trend (Last 7 Days)</Text>
-            <View style={styles.chartWrapper}>
-              <LineChart
-                data={chartData}
-                height={120}
-                width={width - 80}
-                thickness={3}
-                color="#45B2D3"
-                hideDataPoints
-                hideRules
-                hideYAxisText
-                hideAxesAndRules
-                curved
-                isAnimated
-                animateOnMount
-                animationDuration={1500}
-                startFillColor="#45B2D3"
-                endFillColor="#131b26"
-                startOpacity={0.4}
-                endOpacity={0.0}
-              />
             </View>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+              <Ionicons name="close" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
 
-        </ScrollView>
+          <ScrollView 
+            showsVerticalScrollIndicator={false} 
+            style={{ flexShrink: 1 }}
+            contentContainerStyle={styles.scrollContent}
+          >
+            
+            {/* Info Rows */}
+            <View style={styles.infoBox}>
+              <View style={styles.addressRow}>
+                <View style={styles.addressLeft}>
+                  <Ionicons name="location-outline" size={20} color="#45B2D3" />
+                  <Text style={styles.infoText} numberOfLines={2}>{activeStation.address}</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.inlineNavigateBtn} 
+                  activeOpacity={0.8} 
+                  onPress={openNavigation}
+                >
+                  <FontAwesome5 name="directions" size={18} color="#131b26" />
+                </TouchableOpacity>
+              </View>
+              {activeStation.phone && (
+                <View style={[styles.infoRow, { marginTop: 12 }]}>
+                  <Ionicons name="call-outline" size={20} color="#45B2D3" />
+                  <Text style={styles.infoText}>{activeStation.phone}</Text>
+                </View>
+              )}
+            </View>
 
-        {/* Action Button */}
-        <TouchableOpacity style={styles.navigateBtn} activeOpacity={0.9} onPress={openNavigation}>
-          <FontAwesome5 name="directions" size={18} color="#131b26" />
-          <Text style={styles.navigateText}>Navigate to Station</Text>
-        </TouchableOpacity>
+            {/* Current Prices List */}
+            <Text style={styles.sectionTitle}>Live Prices</Text>
+            <View style={styles.pricesGrid}>
+              {pricesList.map((price: any, i: number) => (
+                <View key={i} style={styles.priceItem}>
+                  <Text style={styles.fuelType}>{price.type}</Text>
+                  <Text style={styles.fuelPrice}>{typeof price.value === 'number' ? price.value.toFixed(1) : '---'}</Text>
+                </View>
+              ))}
+            </View>
 
-      </Animated.View>
-    </View>
-  );
+            {/* Analytics Chart */}
+            <View style={styles.chartContainer}>
+              <Text style={styles.sectionTitle}>Price Trend (Last 7 Days)</Text>
+              <View style={styles.chartWrapper}>
+                <LineChart
+                  data={chartData}
+                  height={120}
+                  width={width - 80}
+                  thickness={3}
+                  color="#45B2D3"
+                  hideDataPoints
+                  hideRules
+                  hideYAxisText
+                  hideAxesAndRules
+                  curved
+                  isAnimated
+                  animationDuration={1500}
+                  startFillColor="#45B2D3"
+                  endFillColor="#131b26"
+                  startOpacity={0.4}
+                  endOpacity={0.0}
+                />
+              </View>
+            </View>
+
+          </ScrollView>
+
+        </Animated.View>
+      </View>
+    );
+  } catch (err: any) {
+    console.error(`[FuelPopupCard Crash] Error rendering details for station ${activeStation?.id}:`, err);
+    return (
+      <View style={StyleSheet.absoluteFill} pointerEvents={station ? "auto" : "none"}>
+        {station && <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} activeOpacity={1} />}
+        <Animated.View style={[styles.card, animatedStyle, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <Text style={{ color: '#FFFFFF', fontSize: 16, textAlign: 'center', margin: 20 }}>
+            Unable to load station details.
+          </Text>
+        </Animated.View>
+      </View>
+    );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -209,7 +242,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scrollContent: {
-    paddingBottom: 80, // Space for nav button
+    paddingBottom: 16,
   },
   infoBox: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -220,6 +253,30 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  addressLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 12,
+  },
+  inlineNavigateBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#45B2D3',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#45B2D3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   infoText: {
     color: 'rgba(255,255,255,0.8)',
@@ -271,27 +328,5 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
-  navigateBtn: {
-    position: 'absolute',
-    bottom: 30, // Usually overridden by paddingBottom in parent if insets are large, but this looks good
-    left: 24,
-    right: 24,
-    backgroundColor: '#45B2D3',
-    height: 56,
-    borderRadius: 28,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#45B2D3',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  navigateText: {
-    color: '#131b26',
-    fontSize: 17,
-    fontWeight: '800',
-    marginLeft: 10,
-  }
+
 });

@@ -7,6 +7,6 @@ export default function BaseScreen() {
 const styles = StyleSheet.create({
   canvas: {
     flex: 1,
-    backgroundColor: "#F2F5F8", // Premium subtle light gray map/UI canvas background
+    backgroundColor: "#131b26",
   },
 });

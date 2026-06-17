@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -19,61 +20,76 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // 1. Fetch WA FuelWatch RSS
-    console.log("Fetching FuelWatch RSS...");
-    const response = await fetch("https://www.fuelwatch.wa.gov.au/fuelwatch/fuelWatchRSS");
-    const xml = await response.text();
+    // 1. Fetch WA FuelWatch RSS feeds in parallel for different fuel types
+    console.log("Fetching FuelWatch RSS feeds in parallel...");
+    const products = [
+      { code: 1, type: "U91" },
+      { code: 2, type: "U95" },
+      { code: 6, type: "U98" },
+      { code: 4, type: "Diesel" },
+      { code: 11, type: "Premium Diesel" },
+      { code: 5, type: "LPG" }
+    ];
 
-    // 2. Parse XML (Using Regex to avoid heavy XML parser dependencies in the edge function)
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-    const stations = [];
+    const stationsMap = new Map();
 
-    while ((match = itemRegex.exec(xml)) !== null) {
-      const itemXml = match[1];
-      
-      const getVal = (tag: string) => {
-        const m = itemXml.match(new RegExp(`<${tag}>(.*?)<\/${tag}>`));
-        return m ? m[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1') : ""; // Clean CDATA tags
-      };
+    await Promise.all(products.map(async (prod) => {
+      try {
+        const response = await fetch(`https://www.fuelwatch.wa.gov.au/fuelwatch/fuelWatchRSS?Product=${prod.code}`);
+        const xml = await response.text();
 
-      const title = getVal("title");
-      const brand = getVal("brand");
-      const address = getVal("address");
-      const latitude = parseFloat(getVal("latitude"));
-      const longitude = parseFloat(getVal("longitude"));
-      const priceStr = getVal("price");
+        // 2. Parse XML (Using Regex to avoid heavy XML parser dependencies in the edge function)
+        const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+        let match;
 
-      if (!isNaN(latitude) && !isNaN(longitude)) {
-        // Construct standard station object
-        // Use both brand and address to ensure the ID is completely unique, as some addresses have multiple entries in the XML
-        const uniqueId = `WA_${brand}_${address}`.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+        while ((match = itemRegex.exec(xml)) !== null) {
+          const itemXml = match[1];
+          
+          const getVal = (tag: string) => {
+            const m = itemXml.match(new RegExp(`<${tag}>(.*?)<\/${tag}>`));
+            return m ? m[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1') : ""; // Clean CDATA tags
+          };
 
-        stations.push({
-          id: uniqueId,
-          name: title,
-          brand: brand,
-          address: address,
-          state: "WA",
-          status: "Open",
-          prices: [{ type: "U91", value: parseFloat(priceStr), active: true }], // FuelWatch RSS defaults to ULP
-          location: `POINT(${longitude} ${latitude})`, // PostGIS format
-          updated_at: new Date().toISOString(),
-        });
+          const title = getVal("title");
+          const brand = getVal("brand");
+          const address = getVal("address");
+          const latitude = parseFloat(getVal("latitude"));
+          const longitude = parseFloat(getVal("longitude"));
+          const priceStr = getVal("price");
+
+          if (!isNaN(latitude) && !isNaN(longitude)) {
+            // Construct standard station object
+            const uniqueId = `WA_${brand}_${address}`.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+            const priceVal = parseFloat(priceStr);
+
+            if (!stationsMap.has(uniqueId)) {
+              stationsMap.set(uniqueId, {
+                id: uniqueId,
+                name: title,
+                brand: brand,
+                address: address,
+                state: "WA",
+                status: "Open",
+                prices: [],
+                location: `POINT(${longitude} ${latitude})`, // PostGIS format
+                updated_at: new Date().toISOString(),
+              });
+            }
+
+            const station = stationsMap.get(uniqueId);
+            const existingPrice = station.prices.find((p: any) => p.type === prod.type);
+            if (!existingPrice) {
+              station.prices.push({ type: prod.type, value: priceVal, active: true });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Error fetching/parsing product ${prod.type}:`, err);
       }
-    }
+    }));
 
-    console.log(`Parsed ${stations.length} stations from WA FuelWatch`);
-
-    // Deduplicate the array by ID to prevent PostgreSQL "cannot affect row a second time" errors
-    const uniqueStationsMap = new Map();
-    for (const station of stations) {
-      if (!uniqueStationsMap.has(station.id)) {
-        uniqueStationsMap.set(station.id, station);
-      }
-    }
-    const uniqueStations = Array.from(uniqueStationsMap.values());
-    console.log(`Deduplicated to ${uniqueStations.length} unique stations`);
+    const uniqueStations = Array.from(stationsMap.values());
+    console.log(`Merged and parsed ${uniqueStations.length} unique stations from WA FuelWatch`);
 
     // 3. Upsert into Database
     if (uniqueStations.length > 0) {
@@ -91,11 +107,12 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Function error:", error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error?.message || String(error) }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 400,
     });
   }
 });
+

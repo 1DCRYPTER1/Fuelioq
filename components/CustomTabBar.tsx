@@ -20,13 +20,7 @@ const BASE_HEIGHT = 65; // Height of the flat bar portion
 const WAVE_APEX = 25; // The clearance height allowed for the upward wave peak
 
 const TABS = [
-  {
-    name: "index",
-    label: "Station",
-    iconOutline: "list-outline",
-    iconFilled: "list",
-  },
-  { name: "map", label: "Map", iconOutline: "map-outline", iconFilled: "map" },
+  { name: "index", label: "Map", iconOutline: "map-outline", iconFilled: "map" },
   {
     name: "fuel",
     label: "Fuel",
@@ -51,7 +45,12 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 export default function CustomTabBar({ state, navigation }: any) {
   const insets = useSafeAreaInsets();
-  const numTabs = state.routes.length;
+  
+  // Only render tabs that are registered in the visible TABS array
+  const visibleRoutes = state.routes.filter((route: any) =>
+    TABS.some((t) => t.name === route.name)
+  );
+  const numTabs = visibleRoutes.length || TABS.length;
   const TAB_WIDTH = width / numTabs;
 
   // The total structural canvas height includes the bar, the wave apex space, and the device notch padding
@@ -60,25 +59,30 @@ export default function CustomTabBar({ state, navigation }: any) {
 
   const animationValue = useSharedValue(0);
 
+  // Determine the active index relative to only the visible tabs
+  const activeRouteName = state.routes[state.index]?.name;
+  const activeVisibleIndex = visibleRoutes.findIndex((r: any) => r.name === activeRouteName);
+
   useEffect(() => {
-    animationValue.value = withSpring(state.index, {
+    const targetIndex = activeVisibleIndex !== -1 ? activeVisibleIndex : 0;
+    animationValue.value = withSpring(targetIndex, {
       damping: 20,
       stiffness: 120,
     });
-  }, [state.index]);
+  }, [activeVisibleIndex]);
 
   const animatedPathProps = useAnimatedStyle(() => {
     const currentCenter = animationValue.value * TAB_WIDTH + TAB_WIDTH / 2;
 
-    const waveWidth = 50;
-    // The wave peak now curves beautifully within our newly padded vertical canvas window
-    const waveTopY = WAVE_APEX - 22;
+    const waveWidth = 60;
+    // The wave curves downward to create a sleek dip
+    const waveBottomY = WAVE_APEX + 50;
 
     const d = `
       M 0 ${WAVE_APEX} 
       L ${currentCenter - waveWidth} ${WAVE_APEX}
-      C ${currentCenter - waveWidth / 1.6} ${WAVE_APEX}, ${currentCenter - waveWidth / 2} ${waveTopY}, ${currentCenter} ${waveTopY}
-      C ${currentCenter + waveWidth / 2} ${waveTopY}, ${currentCenter + waveWidth / 1.6} ${WAVE_APEX}, ${currentCenter + waveWidth} ${WAVE_APEX}
+      C ${currentCenter - waveWidth / 1.6} ${WAVE_APEX}, ${currentCenter - waveWidth / 2} ${waveBottomY}, ${currentCenter} ${waveBottomY}
+      C ${currentCenter + waveWidth / 2} ${waveBottomY}, ${currentCenter + waveWidth / 1.6} ${WAVE_APEX}, ${currentCenter + waveWidth} ${WAVE_APEX}
       L ${width} ${WAVE_APEX}
       L ${width} ${totalContainerHeight}
       L 0 ${totalContainerHeight}
@@ -104,9 +108,9 @@ export default function CustomTabBar({ state, navigation }: any) {
           { top: WAVE_APEX, height: BASE_HEIGHT },
         ]}
       >
-        {state.routes.map((route: any, index: number) => {
-          const isFocused = state.index === index;
-          const tabInfo = TABS[index];
+        {visibleRoutes.map((route: any, visibleIndex: number) => {
+          const isFocused = activeVisibleIndex === visibleIndex;
+          const tabInfo = TABS.find((t) => t.name === route.name);
 
           if (!tabInfo) return null;
 
@@ -123,12 +127,12 @@ export default function CustomTabBar({ state, navigation }: any) {
           };
 
           const animatedIconStyle = useAnimatedStyle(() => {
-            const activeDistance = Math.abs(animationValue.value - index);
+            const activeDistance = Math.abs(animationValue.value - visibleIndex);
             let translateY = 0;
 
             if (activeDistance < 1) {
-              // Elevate the active selection smoothly right onto the peak of the wave
-              translateY = (1 - activeDistance) * -18;
+              // Elevate the active selection smoothly above the dip
+              translateY = (1 - activeDistance) * -16;
             }
 
             return {

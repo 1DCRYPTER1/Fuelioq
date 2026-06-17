@@ -91,7 +91,7 @@ export default function FuelBottomSheet({
 
         {/* Pricing Matrix Sub-Grid */}
         <Text style={styles.sectionTitle}>
-          Available Fuel Types ({station.updatedAt})
+          Available Fuel Types ({station.updatedAt}) • Source: {station.state === "WA" ? "FuelWatch" : "FuelCheck"}
         </Text>
         <ScrollView
           horizontal

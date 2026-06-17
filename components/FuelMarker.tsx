@@ -34,30 +34,49 @@ const getBrandShortName = (brand: string) => {
 };
 
 export default function FuelMarker({ station, selectedFuel }: FuelMarkerProps) {
-  // Find the price for the selected fuel type
-  const targetFuel = selectedFuel === "All fuels" ? "U91" : selectedFuel; // Default to U91 if all fuels selected
-  const priceObj = station.prices?.find((p: any) => p.type === targetFuel);
-  const priceStr = priceObj && typeof priceObj.value === 'number' ? `${priceObj.value.toFixed(1)}` : '---';
-  
-  const brandColor = getBrandColor(station.brand);
-  const shortBrand = getBrandShortName(station.brand);
+  try {
+    let priceObj = null;
+    const prices = station && Array.isArray(station.prices) ? station.prices : [];
+    
+    if (selectedFuel === "All fuels") {
+      priceObj = prices.find((p: any) => p && p.type === "U91" && typeof p.value === 'number' && p.value > 0);
+      if (!priceObj && prices.length > 0) {
+        priceObj = prices.find((p: any) => p && typeof p.value === 'number' && p.value > 0);
+      }
+    } else {
+      priceObj = prices.find((p: any) => p && p.type === selectedFuel && typeof p.value === 'number' && p.value > 0);
+    }
+    
+    const priceStr = priceObj ? `${priceObj.value.toFixed(1)}` : '---';
+    const brandColor = getBrandColor(station?.brand);
+    const shortBrand = getBrandShortName(station?.brand);
 
-  return (
-    <View style={styles.markerContainer}>
-      {/* The main white bubble like PetrolSpy */}
-      <View style={[styles.bubble, { borderColor: brandColor }]}>
-        <Text style={[styles.priceText, { color: brandColor }]}>{priceStr}</Text>
+    return (
+      <View style={styles.markerContainer}>
+        {/* The main white bubble like PetrolSpy */}
+        <View style={[styles.bubble, { borderColor: brandColor }]}>
+          <Text style={[styles.priceText, { color: brandColor }]}>{priceStr}</Text>
+        </View>
+        
+        {/* Brand indicator replacing the logo */}
+        <View style={[styles.brandBadge, { backgroundColor: brandColor }]}>
+          <Text style={styles.brandText}>{shortBrand}</Text>
+        </View>
+        
+        {/* Downward pointer */}
+        <View style={[styles.pointer, { borderTopColor: brandColor }]} />
       </View>
-      
-      {/* Brand indicator replacing the logo */}
-      <View style={[styles.brandBadge, { backgroundColor: brandColor }]}>
-        <Text style={styles.brandText}>{shortBrand}</Text>
+    );
+  } catch (err: any) {
+    console.error(`[FuelMarker Crash] Failed rendering marker for station ${station?.id}:`, err);
+    return (
+      <View style={styles.markerContainer}>
+        <View style={[styles.bubble, { borderColor: '#E74C3C' }]}>
+          <Text style={[styles.priceText, { color: '#E74C3C' }]}>Err</Text>
+        </View>
       </View>
-      
-      {/* Downward pointer */}
-      <View style={[styles.pointer, { borderTopColor: brandColor }]} />
-    </View>
-  );
+    );
+  }
 }
 
 const styles = StyleSheet.create({

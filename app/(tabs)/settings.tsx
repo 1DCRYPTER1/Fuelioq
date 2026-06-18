@@ -36,7 +36,7 @@ export default function SettingsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
 
-  const isLiveState = activeState === "NSW" || activeState === "WA";
+  const isLiveState = activeState === "NSW" || activeState === "WA" || activeState === "SA" || activeState === "QLD" || activeState === "ACT";
 
   useEffect(() => {
     setVisibleCount(6);
@@ -119,7 +119,7 @@ export default function SettingsScreen() {
           >
             {ALL_STATES.map((state) => {
               const isActive = activeState === state;
-              const isLive = state === "NSW" || state === "WA";
+              const isLive = state === "NSW" || state === "WA" || state === "SA" || state === "QLD" || state === "ACT";
               return (
                 <TouchableOpacity
                   key={state}

@@ -17,9 +17,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export function normalizeFuelType(type: string): string {
   if (!type) return "";
   const t = type.toUpperCase().trim();
-  if (t === "U91" || t === "ULP" || t === "E10" || t === "UNLEADED 91") return "U91";
-  if (t === "U95" || t === "P95" || t === "PULP95" || t === "PREMIUM 95") return "U95";
-  if (t === "U98" || t === "P98" || t === "PULP98" || t === "PREMIUM 98") return "U98";
+  if (t === "U91" || t === "ULP" || t === "E10" || t === "UNLEADED 91" || t === "UNLEADED") return "U91";
+  if (t === "U95" || t === "P95" || t === "PULP95" || t === "PREMIUM 95" || t === "PREMIUM UNLEADED 95") return "U95";
+  if (t === "U98" || t === "P98" || t === "PULP98" || t === "PREMIUM 98" || t === "PREMIUM UNLEADED 98") return "U98";
   if (t === "DIESEL" || t === "DL" || t === "DSL") return "Diesel";
   if (t === "PREMIUM DIESEL" || t === "PDL" || t === "PDSL") return "Premium Diesel";
   if (t === "LPG") return "LPG";

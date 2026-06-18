@@ -76,12 +76,18 @@ serve(async (req) => {
 
     if (data.stations) {
       for (const st of data.stations) {
+        // Determine if it's an ACT station based on the address
+        let stationState = "NSW";
+        if (st.address && st.address.match(/\bACT\b/i)) {
+          stationState = "ACT";
+        }
+
         mappedStations.set(st.code, {
-          id: `NSW_${st.code}`,
+          id: `${stationState}_${st.code}`,
           name: st.name,
           brand: st.brand,
           address: st.address,
-          state: "NSW",
+          state: stationState,
           status: "Open",
           location: `POINT(${st.location.longitude} ${st.location.latitude})`,
           prices: [],

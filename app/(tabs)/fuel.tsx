@@ -55,7 +55,7 @@ export default function FuelScreen() {
   }, [selectedCity]);
 
   const isUnavailable = useMemo(() => {
-    return activeCityConfig.state !== "NSW" && activeCityConfig.state !== "WA";
+    return activeCityConfig.state !== "NSW" && activeCityConfig.state !== "WA" && activeCityConfig.state !== "SA" && activeCityConfig.state !== "QLD" && activeCityConfig.state !== "ACT";
   }, [activeCityConfig.state]);
 
   // Fetch real-time averages from our database when selected state changes

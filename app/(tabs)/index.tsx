@@ -99,7 +99,7 @@ export default function FuelMapScreen() {
   const [isStateDropdownOpen, setIsStateDropdownOpen] = useState(false);
   const stateDropdownHeight = useSharedValue(0);
 
-  const isUnavailableState = selectedState !== "NSW" && selectedState !== "WA";
+  const isUnavailableState = selectedState !== "NSW" && selectedState !== "WA" && selectedState !== "SA" && selectedState !== "QLD" && selectedState !== "ACT";
 
   useEffect(() => {
     const handler = setTimeout(() => {

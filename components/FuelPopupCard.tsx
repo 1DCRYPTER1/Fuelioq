@@ -59,6 +59,10 @@ export default function FuelPopupCard({ station, onClose }: Props) {
       }
     }
 
+    let sourceName = "FuelCheck";
+    if (activeStation.state === "WA") sourceName = "FuelWatch";
+    else if (activeStation.state === "SA" || activeStation.state === "QLD") sourceName = "Informed Sources";
+
     // Mock historical data for the chart (smooth curve)
     const pricesList = Array.isArray(activeStation.prices) ? activeStation.prices : [];
     const validPriceValues = pricesList
@@ -90,9 +94,14 @@ export default function FuelPopupCard({ station, onClose }: Props) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title} numberOfLines={1}>{activeStation.name}</Text>
-                <Text style={styles.subtitle}>
-                  Updated {timeString} • Source: {activeStation.state === "WA" ? "FuelWatch" : "FuelCheck"}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                  <Ionicons name="time-outline" size={13} color="#45B2D3" />
+                  <Text style={[styles.subtitle, { marginLeft: 6 }]}>Updated {timeString}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                  <Ionicons name="server-outline" size={13} color="#F1C40F" />
+                  <Text style={[styles.subtitle, { marginLeft: 6, color: '#F1C40F' }]}>Source: {sourceName}</Text>
+                </View>
               </View>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>

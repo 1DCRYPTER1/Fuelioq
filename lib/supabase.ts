@@ -28,12 +28,26 @@ export function normalizeFuelType(type: string): string {
 
 export function normalizeStationPrices(station: any): any {
   if (!station || !Array.isArray(station.prices)) return station;
+  
+  const uniquePrices = new Map<string, any>();
+  
+  for (const p of station.prices) {
+    const normType = normalizeFuelType(p.type);
+    if (!normType) continue;
+    
+    if (uniquePrices.has(normType)) {
+      const existing = uniquePrices.get(normType);
+      if (typeof p.value === 'number' && p.value < existing.value) {
+        uniquePrices.set(normType, { ...p, type: normType });
+      }
+    } else {
+      uniquePrices.set(normType, { ...p, type: normType });
+    }
+  }
+
   return {
     ...station,
-    prices: station.prices.map((p: any) => ({
-      ...p,
-      type: normalizeFuelType(p.type)
-    }))
+    prices: Array.from(uniquePrices.values())
   };
 }
 

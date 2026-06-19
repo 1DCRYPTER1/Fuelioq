@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useMemo } from "react";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
   ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import { useAlert } from "../../context/AlertContext";
 import { getStationsByState } from "../../lib/supabase";
 
 const ALL_STATES = ["NSW", "WA", "VIC", "QLD", "SA", "TAS", "ACT", "NT"];
@@ -29,6 +30,7 @@ const getBrandColor = (brand: string) => {
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const { showAlert } = useAlert();
 
   const [activeState, setActiveState] = useState("NSW");
   const [stations, setStations] = useState<any[]>([]);
@@ -58,6 +60,13 @@ export default function SettingsScreen() {
         }
       } catch (err) {
         console.warn("Failed fetching stations for settings:", err);
+        if (active) {
+          showAlert({
+            type: 'error',
+            title: 'Data Sync Failed',
+            message: 'Failed to load brand statistics. Please check your connection.',
+          });
+        }
       } finally {
         if (active) {
           setIsLoading(false);
@@ -247,6 +256,8 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
+
+
 
         {/* Footer Area */}
         <View style={[styles.footer, { paddingBottom: insets.bottom + 100 }]}>
@@ -500,5 +511,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "rgba(255, 255, 255, 0.3)",
     fontWeight: "600",
-  },
+  }
 });

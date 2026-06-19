@@ -13,6 +13,7 @@
     "@gorhom/bottom-sheet": "^5.2.14",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.1.8",
+    "@sentry/react-native": "^8.15.0",
     "@supabase/supabase-js": "^2.108.1",
     "expo": "~54.0.34",
     "expo-constants": "~18.0.13",

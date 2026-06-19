@@ -23,6 +23,7 @@ import * as Location from "expo-location";
 import { getStationsByState } from "../../lib/supabase";
 import FuelMarker from "../../components/FuelMarker";
 import FuelPopupCard from "../../components/FuelPopupCard";
+import { useAlert } from "../../context/AlertContext";
 
 const { width } = Dimensions.get("window");
 
@@ -84,14 +85,15 @@ const FUEL_TYPES = ["All fuels", "U91", "U95", "U98", "Diesel", "Premium Diesel"
 export default function FuelMapScreen() {
   const insets = useSafeAreaInsets();
   const mapRef = useRef<any>(null);
+  const { showAlert } = useAlert();
 
   const [stations, setStations] = useState<any[]>([]);
   const [selectedStation, setSelectedStation] = useState<any>(null);
   const [selectedFuel, setSelectedFuel] = useState("All fuels");
-  const [selectedState, setSelectedState] = useState("NSW");
+  const [selectedState, setSelectedState] = useState<string | null>(null);
   
   const [debouncedFuel, setDebouncedFuel] = useState("All fuels");
-  const [debouncedState, setDebouncedState] = useState("NSW");
+  const [debouncedState, setDebouncedState] = useState<string | null>(null);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownHeight = useSharedValue(0);
@@ -99,7 +101,7 @@ export default function FuelMapScreen() {
   const [isStateDropdownOpen, setIsStateDropdownOpen] = useState(false);
   const stateDropdownHeight = useSharedValue(0);
 
-  const isUnavailableState = selectedState !== "NSW" && selectedState !== "WA" && selectedState !== "SA" && selectedState !== "QLD" && selectedState !== "ACT";
+  const isUnavailableState = selectedState !== null && selectedState !== "NSW" && selectedState !== "WA" && selectedState !== "SA" && selectedState !== "QLD" && selectedState !== "ACT";
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -109,6 +111,7 @@ export default function FuelMapScreen() {
   }, [selectedFuel]);
 
   useEffect(() => {
+    if (!selectedState) return;
     const handler = setTimeout(() => {
       setDebouncedState(selectedState);
     }, 200);
@@ -117,42 +120,49 @@ export default function FuelMapScreen() {
 
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
+      let finalState = "NSW";
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const location = await Location.getCurrentPositionAsync({});
+          
+          setTimeout(() => {
+            if (mapRef.current) {
+              mapRef.current.animateToRegion({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                latitudeDelta: 0.04,
+                longitudeDelta: 0.04,
+              }, 1000);
+            }
+          }, 500);
 
-      const location = await Location.getCurrentPositionAsync({});
-      
-      // Ensure mapRef exists before calling animateToRegion
-      setTimeout(() => {
-        if (mapRef.current) {
-          mapRef.current.animateToRegion({
+          const geocode = await Location.reverseGeocodeAsync({
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
-            latitudeDelta: 0.04,
-            longitudeDelta: 0.04,
-          }, 1000);
-        }
-      }, 500);
+          });
 
-      // Reverse geocode to detect user's local Australian state on startup
-      try {
-        const geocode = await Location.reverseGeocodeAsync({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-
-        if (geocode && geocode.length > 0) {
-          const region = geocode[0].region;
-          if (region) {
-            const detectedState = mapRegionToStateCode(region);
-            if (detectedState) {
-              console.log(`Detected local state: ${detectedState}`);
-              setSelectedState(detectedState);
+          if (geocode && geocode.length > 0) {
+            const region = geocode[0].region;
+            if (region) {
+              const detectedState = mapRegionToStateCode(region);
+              if (detectedState) {
+                console.log(`Detected local state: ${detectedState}`);
+                finalState = detectedState;
+              }
             }
           }
         }
       } catch (err) {
         console.warn("Failed reverse geocoding location:", err);
+        showAlert({
+          type: 'warning',
+          title: 'Location Notice',
+          message: 'Could not determine your local state. Falling back to default.',
+          duration: 4000
+        });
+      } finally {
+        setSelectedState(finalState);
       }
     })();
   }, []);
@@ -160,12 +170,33 @@ export default function FuelMapScreen() {
   // Automatically fetch the entire state's data when the user switches states.
   // Uses active-flag cleanup to ensure out-of-order rapid responses don't corrupt state.
   useEffect(() => {
+    if (!debouncedState) return;
     let active = true;
     (async () => {
-      const data = await getStationsByState(debouncedState);
-      if (active) {
-        console.log(`Fetched ${data?.length || 0} stations for ${debouncedState}`);
-        setStations(data || []);
+      try {
+        const data = await getStationsByState(debouncedState);
+        if (active) {
+          console.log(`Fetched ${data?.length || 0} stations for ${debouncedState}`);
+          setStations(data || []);
+          
+          if (data && data.length > 0) {
+            showAlert({
+              type: 'success',
+              title: 'Live Data Synced',
+              message: `Fetched ${data.length} stations for ${debouncedState}`,
+              duration: 4000
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch state data:", err);
+        if (active) {
+          showAlert({
+            type: 'error',
+            title: 'Network Error',
+            message: `Failed to fetch live rates for ${debouncedState}. Please check your connection.`,
+          });
+        }
       }
     })();
     return () => {
@@ -214,7 +245,7 @@ export default function FuelMapScreen() {
     overflow: "hidden",
     position: 'absolute',
     right: 0,
-    top: 70,
+    top: 0,
   }));
 
   const mapMarkers = useMemo(() => {
@@ -290,7 +321,7 @@ export default function FuelMapScreen() {
             <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#FFFFFF" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.statePickerButton} activeOpacity={0.9} onPress={toggleStateDropdown}>
-            <Text style={styles.statePickerText}>{selectedState}</Text>
+            <Text style={styles.statePickerText}>{selectedState || "..."}</Text>
             <Ionicons name={isStateDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#131b26" />
           </TouchableOpacity>
         </View>

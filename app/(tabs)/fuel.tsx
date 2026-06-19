@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { LineChart } from "react-native-gifted-charts";
 import { getStateAverages } from "../../lib/supabase";
+import { useAlert } from "../../context/AlertContext";
 
 const { width } = Dimensions.get("window");
 
@@ -42,6 +43,7 @@ const BASE_PRICES: Record<string, number> = {
 
 export default function FuelScreen() {
   const insets = useSafeAreaInsets();
+  const { showAlert } = useAlert();
 
   const [selectedCity, setSelectedCity] = useState("Perth");
   const [selectedFuel, setSelectedFuel] = useState("U91");
@@ -71,6 +73,11 @@ export default function FuelScreen() {
         setDbAverages(data);
       } catch (err) {
         console.warn("Failed fetching live state averages:", err);
+        showAlert({
+          type: 'error',
+          title: 'Analytics Error',
+          message: 'Failed to load live price averages. Please check your connection.',
+        });
       } finally {
         setIsLoading(false);
       }

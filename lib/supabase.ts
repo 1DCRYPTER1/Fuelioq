@@ -188,3 +188,65 @@ export async function getStateAverages(state: string) {
     return null;
   }
 }
+
+// Fetch the last 14 price history records for a station and fuel type
+export async function getStationPriceHistory(stationId: string, fuelType: string) {
+  try {
+    const normType = normalizeFuelType(fuelType);
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/fuel_price_history?station_id=eq.${stationId}&fuel_type=eq.${normType}&order=recorded_at.desc&limit=14`,
+      {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error fetching station price history:", response.status, errorText);
+      return [];
+    }
+
+    const data = await response.json();
+    // Return sorted oldest to newest for the graph plotting
+    return Array.isArray(data) ? data.reverse() : [];
+  } catch (error) {
+    console.error("Error fetching station price history:", error);
+    return [];
+  }
+}
+
+// Fetch the last 30 daily price averages for a state and fuel type via RPC
+export async function getStateHistoryAverages(state: string, fuelType: string) {
+  try {
+    const normType = normalizeFuelType(fuelType);
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/get_state_history_averages`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        state_code: state,
+        fuel_type_code: normType
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Error fetching state history averages:", response.status, errorText);
+      return [];
+    }
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("Error fetching state history averages:", error);
+    return [];
+  }
+}
+
+

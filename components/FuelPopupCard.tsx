@@ -5,6 +5,7 @@ import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-ico
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { showLocation } from 'react-native-map-link';
 import { LineChart } from 'react-native-gifted-charts';
+import { getStationPriceHistory } from '../lib/supabase';
 
 const { width, height } = Dimensions.get('window');
 
@@ -17,15 +18,49 @@ export default function FuelPopupCard({ station, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(height);
   const [activeStation, setActiveStation] = useState(station);
+  const [selectedFuelType, setSelectedFuelType] = useState<string | null>(null);
+  const [historyData, setHistoryData] = useState<{ value: number }[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   useEffect(() => {
     if (station) {
       setActiveStation(station);
       translateY.value = withTiming(0, { duration: 300 });
+      
+      // Auto-select the first available fuel type
+      const prices = Array.isArray(station.prices) ? station.prices : [];
+      if (prices.length > 0) {
+        setSelectedFuelType(prices[0].type);
+      } else {
+        setSelectedFuelType(null);
+      }
     } else {
       translateY.value = withTiming(height, { duration: 250 });
     }
   }, [station]);
+
+  useEffect(() => {
+    if (activeStation && selectedFuelType) {
+      setIsLoadingHistory(true);
+      getStationPriceHistory(activeStation.id, selectedFuelType)
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setHistoryData(data.map((d: any) => ({ value: Number(d.price) })));
+          } else {
+            setHistoryData([]);
+          }
+        })
+        .catch((err) => {
+          console.error("Error loading price history:", err);
+          setHistoryData([]);
+        })
+        .finally(() => {
+          setIsLoadingHistory(false);
+        });
+    } else {
+      setHistoryData([]);
+    }
+  }, [activeStation, selectedFuelType]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
@@ -63,18 +98,7 @@ export default function FuelPopupCard({ station, onClose }: Props) {
     if (activeStation.state === "WA") sourceName = "FuelWatch";
     else if (activeStation.state === "SA" || activeStation.state === "QLD") sourceName = "Informed Sources";
 
-    // Mock historical data for the chart (smooth curve)
     const pricesList = Array.isArray(activeStation.prices) ? activeStation.prices : [];
-    const validPriceValues = pricesList
-      .map((p: any) => p && typeof p.value === 'number' ? p.value : null)
-      .filter((v: number | null): v is number => v !== null && v > 0);
-    const maxPrice = validPriceValues.length > 0 ? Math.max(...validPriceValues) : 180;
-
-    const chartData = [
-      { value: 185 }, { value: 182 }, { value: 180 }, { value: 178 },
-      { value: 184 }, { value: 189 }, { value: 195 }, { value: 199 },
-      { value: maxPrice }
-    ];
 
     return (
       <View style={StyleSheet.absoluteFill} pointerEvents={station ? "auto" : "none"}>
@@ -139,42 +163,67 @@ export default function FuelPopupCard({ station, onClose }: Props) {
             </View>
 
             {/* Current Prices List */}
-            <Text style={styles.sectionTitle}>Live Prices</Text>
+            <Text style={styles.sectionTitle}>Live Prices (Tap to view history)</Text>
             <View style={styles.pricesGrid}>
-              {pricesList.map((price: any, i: number) => (
-                <View key={i} style={styles.priceItem}>
-                  <Text style={styles.fuelType}>{price.type}</Text>
-                  <Text style={styles.fuelPrice}>{typeof price.value === 'number' ? price.value.toFixed(1) : '---'}</Text>
-                </View>
-              ))}
+              {pricesList.map((price: any, i: number) => {
+                const isSelected = selectedFuelType === price.type;
+                return (
+                  <TouchableOpacity 
+                    key={i} 
+                    style={[
+                      styles.priceItem, 
+                      isSelected && styles.priceItemActive
+                    ]}
+                    onPress={() => setSelectedFuelType(price.type)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.fuelType}>{price.type}</Text>
+                    <Text style={styles.fuelPrice}>{typeof price.value === 'number' ? price.value.toFixed(1) : '---'}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Analytics Chart */}
             <View style={styles.chartContainer}>
-              <Text style={styles.sectionTitle}>Price Trend (Last 7 Days)</Text>
+              <Text style={styles.sectionTitle}>Price Trend {selectedFuelType ? `(${selectedFuelType})` : ''}</Text>
               <View style={styles.chartWrapper}>
-                <LineChart
-                  data={chartData}
-                  height={120}
-                  width={width - 80}
-                  thickness={3}
-                  color="#45B2D3"
-                  hideDataPoints
-                  hideRules
-                  hideYAxisText
-                  hideAxesAndRules
-                  curved
-                  isAnimated
-                  animationDuration={1500}
-                  startFillColor="#45B2D3"
-                  endFillColor="#131b26"
-                  startOpacity={0.4}
-                  endOpacity={0.0}
-                />
+                {isLoadingHistory ? (
+                  <View style={{ height: 120, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>Loading price trends...</Text>
+                  </View>
+                ) : historyData.length > 1 ? (
+                  <LineChart
+                    data={historyData}
+                    height={120}
+                    width={width - 80}
+                    thickness={3}
+                    color="#45B2D3"
+                    hideDataPoints
+                    hideRules
+                    hideYAxisText
+                    hideAxesAndRules
+                    curved
+                    isAnimated
+                    animationDuration={1000}
+                    startFillColor="#45B2D3"
+                    endFillColor="#131b26"
+                    startOpacity={0.4}
+                    endOpacity={0.0}
+                  />
+                ) : (
+                  <View style={{ height: 120, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}>
+                    <Ionicons name="trending-up-outline" size={32} color="rgba(255,255,255,0.2)" />
+                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', marginTop: 8 }}>
+                      No price trend history recorded yet for this station.
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
 
           </ScrollView>
+
 
         </Animated.View>
       </View>
@@ -307,12 +356,18 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   priceItem: {
-    backgroundColor: '#45B2D3',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 16,
     minWidth: '47%',
     flex: 1,
+  },
+  priceItemActive: {
+    backgroundColor: 'rgba(69, 178, 211, 0.15)',
+    borderColor: '#45B2D3',
   },
   fuelType: {
     color: 'rgba(255,255,255,0.9)',

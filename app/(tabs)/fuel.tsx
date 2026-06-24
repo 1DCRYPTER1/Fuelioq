@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { LineChart } from "react-native-gifted-charts";
-import { getStateAverages } from "../../lib/supabase";
+import { getStateAverages, getStateHistoryAverages } from "../../lib/supabase";
 import { useAlert } from "../../context/AlertContext";
 
 const { width } = Dimensions.get("window");
@@ -50,6 +50,8 @@ export default function FuelScreen() {
   const [isCityModalVisible, setIsCityModalVisible] = useState(false);
   const [dbAverages, setDbAverages] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [historyData, setHistoryData] = useState<{ value: number; label: string }[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // Map city to state
   const activeCityConfig = useMemo(() => {
@@ -84,6 +86,44 @@ export default function FuelScreen() {
     })();
   }, [activeCityConfig.state, isUnavailable]);
 
+  // Fetch real historical averages from our database
+  useEffect(() => {
+    if (isUnavailable) {
+      setHistoryData([]);
+      return;
+    }
+    setIsLoadingHistory(true);
+    getStateHistoryAverages(activeCityConfig.state, selectedFuel)
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setHistoryData(
+            data.map((item: any) => {
+              let label = "";
+              if (item.day) {
+                const dateParts = item.day.split('-');
+                if (dateParts.length === 3) {
+                  label = `${parseInt(dateParts[2])}/${parseInt(dateParts[1])}`;
+                }
+              }
+              return {
+                value: Number(item.average_price),
+                label: label
+              };
+            })
+          );
+        } else {
+          setHistoryData([]);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed fetching state history:", err);
+        setHistoryData([]);
+      })
+      .finally(() => {
+        setIsLoadingHistory(false);
+      });
+  }, [activeCityConfig.state, selectedFuel, isUnavailable]);
+
   // Extract stats: average, min, max
   const stats = useMemo(() => {
     const defaultBase = BASE_PRICES[selectedFuel] || 175.0;
@@ -105,128 +145,6 @@ export default function FuelScreen() {
       isLive: false,
     };
   }, [dbAverages, selectedFuel]);
-
-  // Generate ACCC Price Cycle historical data
-  const chartPoints = useMemo(() => {
-    const basePrice = stats.average;
-    const pointsCount = 30;
-    const data = [];
-    const now = new Date();
-
-    if (selectedCity === "Perth") {
-      // WA follows a highly structured weekly cycle (Peak is Wednesday, Bottom is Monday)
-      for (let i = 0; i < pointsCount; i++) {
-        const date = new Date(now.getTime() - (pointsCount - 1 - i) * 24 * 60 * 60 * 1000);
-        const dayOfWeek = date.getDay(); // 0-6
-
-        // Cycle amplitude factor based on weekday
-        let cycleFactor = 0;
-        if (dayOfWeek === 2) cycleFactor = 0.95; // Tuesday rising
-        else if (dayOfWeek === 3) cycleFactor = 1.0; // Peak on Wednesday
-        else if (dayOfWeek === 4) cycleFactor = 0.8;
-        else if (dayOfWeek === 5) cycleFactor = 0.6;
-        else if (dayOfWeek === 6) cycleFactor = 0.4;
-        else if (dayOfWeek === 0) cycleFactor = 0.2; // Low Sunday
-        else if (dayOfWeek === 1) cycleFactor = 0.05; // Lowest Monday
-
-        const price = basePrice + (cycleFactor - 0.4) * 28 + Math.sin(i / 1.5) * 1.5;
-        data.push({
-          value: parseFloat(price.toFixed(1)),
-          label: `${date.getDate()}/${date.getMonth() + 1}`,
-        });
-      }
-    } else if (["Sydney", "Melbourne", "Brisbane", "Adelaide"].includes(selectedCity)) {
-      // East Coast follows a ~30 day cyclical wave (sudden rise, slow decay)
-      const cycleLength = 30;
-      for (let i = 0; i < pointsCount; i++) {
-        const date = new Date(now.getTime() - (pointsCount - 1 - i) * 24 * 60 * 60 * 1000);
-        const phase = i % cycleLength;
-
-        let cycleFactor = 0;
-        if (phase < 3) {
-          // Rapid rise (3 days)
-          cycleFactor = 0.15 + (phase / 3) * 0.85;
-        } else {
-          // Slow decay (27 days)
-          const decayPhase = phase - 3;
-          cycleFactor = 1.0 - (decayPhase / (cycleLength - 3)) * 0.85;
-        }
-
-        const price = basePrice + (cycleFactor - 0.45) * 35 + Math.sin(i / 2) * 1.2;
-        data.push({
-          value: parseFloat(price.toFixed(1)),
-          label: `${date.getDate()}/${date.getMonth() + 1}`,
-        });
-      }
-    } else {
-      // Canberra, Hobart, Darwin have stable non-cyclical drift
-      let currentPrice = basePrice;
-      for (let i = 0; i < pointsCount; i++) {
-        const date = new Date(now.getTime() - (pointsCount - 1 - i) * 24 * 60 * 60 * 1000);
-        const randomDrift = Math.sin(i / 2.5) * 1.8 + Math.cos(i / 4) * 0.8;
-        const price = currentPrice + randomDrift;
-        data.push({
-          value: parseFloat(price.toFixed(1)),
-          label: `${date.getDate()}/${date.getMonth() + 1}`,
-        });
-      }
-    }
-
-    // Adjust the last point to exactly match the current average for continuity
-    if (data.length > 0) {
-      data[data.length - 1].value = basePrice;
-    }
-
-    return data;
-  }, [selectedCity, stats.average]);
-
-  // Determine recommendations based on cycle phase
-  const recommendation = useMemo(() => {
-    const today = new Date();
-    const dayOfWeek = today.getDay();
-
-    if (selectedCity === "Perth") {
-      // Perth cycle advice
-      if (dayOfWeek === 1 || dayOfWeek === 0) {
-        return {
-          status: "Buy Now",
-          advice: "Prices are at the bottom of the weekly cycle. Fill up today before the Tuesday/Wednesday spike!",
-          color: "#2ECC71",
-          icon: "checkmark-circle",
-        };
-      } else if (dayOfWeek === 2 || dayOfWeek === 3) {
-        return {
-          status: "Hold Off",
-          advice: "Prices are currently peaking. Wait a few days for prices to drift down if possible.",
-          color: "#E74C3C",
-          icon: "warning",
-        };
-      } else {
-        return {
-          status: "Fair Time to Buy",
-          advice: "Prices are slowly declining from the midweek peak. Shop around for cheap local stations.",
-          color: "#F39C12",
-          icon: "information-circle",
-        };
-      }
-    } else if (["Sydney", "Melbourne", "Brisbane", "Adelaide"].includes(selectedCity)) {
-      // East Coast cycle advice: simulate a declining phase
-      return {
-        status: "Good Time to Buy",
-        advice: "The price cycle is currently in the decline phase. Fill up at your convenience.",
-        color: "#2ECC71",
-        icon: "checkmark-circle",
-      };
-    } else {
-      // Non-cyclical cities
-      return {
-        status: "Stable Prices",
-        advice: "Prices are stable in this region. Look for local independent retailers for the best deals.",
-        color: "#3498DB",
-        icon: "information-circle",
-      };
-    }
-  }, [selectedCity]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -305,30 +223,44 @@ export default function FuelScreen() {
             </View>
 
             <View style={styles.chartWrapper}>
-              <LineChart
-                data={chartPoints}
-                height={140}
-                width={width - 72}
-                thickness={3}
-                color="#45B2D3"
-                hideDataPoints
-                hideRules
-                hideYAxisText
-                curved
-                isAnimated
-                animationDuration={1000}
-                startFillColor="#45B2D3"
-                endFillColor="#131b26"
-                startOpacity={0.25}
-                endOpacity={0.0}
-                yAxisColor="rgba(255,255,255,0.1)"
-                xAxisColor="rgba(255,255,255,0.1)"
-                xAxisLabelTextStyle={{
-                  color: "rgba(255,255,255,0.4)",
-                  fontSize: 9,
-                }}
-                rulesColor="rgba(255,255,255,0.05)"
-              />
+              {isLoadingHistory ? (
+                <View style={{ height: 140, justifyContent: 'center', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#45B2D3" />
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 8 }}>Loading price cycles...</Text>
+                </View>
+              ) : historyData.length > 1 ? (
+                <LineChart
+                  data={historyData}
+                  height={140}
+                  width={width - 72}
+                  thickness={3}
+                  color="#45B2D3"
+                  hideDataPoints
+                  hideRules
+                  hideYAxisText
+                  curved
+                  isAnimated
+                  animationDuration={1000}
+                  startFillColor="#45B2D3"
+                  endFillColor="#131b26"
+                  startOpacity={0.25}
+                  endOpacity={0.0}
+                  yAxisColor="rgba(255,255,255,0.1)"
+                  xAxisColor="rgba(255,255,255,0.1)"
+                  xAxisLabelTextStyle={{
+                    color: "rgba(255,255,255,0.4)",
+                    fontSize: 9,
+                  }}
+                  rulesColor="rgba(255,255,255,0.05)"
+                />
+              ) : (
+                <View style={{ height: 140, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}>
+                  <Ionicons name="trending-up-outline" size={32} color="rgba(255,255,255,0.2)" />
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center', marginTop: 8 }}>
+                    No historical price trends recorded yet for this state.
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.chartFooter}>
@@ -358,18 +290,7 @@ export default function FuelScreen() {
             </View>
           </View>
 
-          {/* 5. Buying Advisory Recommendation */}
-          <View style={[styles.glassCard, { borderLeftWidth: 4, borderLeftColor: recommendation.color }]}>
-            <View style={styles.recommendationHeader}>
-              <Ionicons name={recommendation.icon as any} size={24} color={recommendation.color} />
-              <Text style={[styles.recommendationTitle, { color: recommendation.color }]}>
-                {recommendation.status}
-              </Text>
-            </View>
-            <Text style={styles.recommendationText}>{recommendation.advice}</Text>
-          </View>
-
-          <View style={{ height: 120 }} />
+          <View style={{ height: 60 }} />
         </ScrollView>
       )}
 

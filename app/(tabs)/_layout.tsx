@@ -5,7 +5,6 @@ export default function TabLayout() {
   return (
     <Tabs tabBar={(props) => <CustomTabBar {...props} />}>
       <Tabs.Screen name="index" options={{ headerShown: false }} />
-      <Tabs.Screen name="map" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="fuel" options={{ headerShown: false }} />
       <Tabs.Screen name="favorite" options={{ headerShown: false }} />
       <Tabs.Screen name="settings" options={{ headerShown: false }} />

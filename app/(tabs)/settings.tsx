@@ -1,7 +1,9 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,8 +39,32 @@ export default function SettingsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(6);
+  const [isLegalModalVisible, setIsLegalModalVisible] = useState(false);
+  const [searchPreference, setSearchPreference] = useState<"state" | "suburb">("state");
 
-  const isLiveState = activeState === "NSW" || activeState === "WA" || activeState === "SA" || activeState === "QLD" || activeState === "ACT";
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await AsyncStorage.getItem("search_preference");
+        if (val === "suburb" || val === "state") {
+          setSearchPreference(val);
+        }
+      } catch (err) {
+        console.warn("Failed to load search preference:", err);
+      }
+    })();
+  }, []);
+
+  const saveSearchPreference = async (val: "state" | "suburb") => {
+    setSearchPreference(val);
+    try {
+      await AsyncStorage.setItem("search_preference", val);
+    } catch (err) {
+      console.warn("Failed to save search preference:", err);
+    }
+  };
+
+  const isLiveState = activeState === "NSW" || activeState === "WA" || activeState === "SA" || activeState === "QLD" || activeState === "ACT" || activeState === "VIC";
 
   useEffect(() => {
     setVisibleCount(6);
@@ -129,6 +155,8 @@ export default function SettingsScreen() {
             {ALL_STATES.map((state) => {
               const isActive = activeState === state;
               const isLive = state === "NSW" || state === "WA" || state === "SA" || state === "QLD" || state === "ACT";
+              const isDelayed = state === "VIC";
+              const hasData = isLive || isDelayed;
               return (
                 <TouchableOpacity
                   key={state}
@@ -140,20 +168,23 @@ export default function SettingsScreen() {
                   style={[
                     styles.stateChip,
                     isActive && styles.stateChipActive,
-                    !isLive && !isActive && styles.stateChipDisabled,
+                    !hasData && !isActive && styles.stateChipDisabled,
                   ]}
                 >
                   <Text
                     style={[
                       styles.stateChipText,
                       isActive && styles.stateChipTextActive,
-                      !isLive && !isActive && styles.stateChipTextDisabled,
+                      !hasData && !isActive && styles.stateChipTextDisabled,
                     ]}
                   >
                     {state}
                   </Text>
                   {isLive && (
                     <View style={[styles.liveDot, isActive && styles.liveDotActive]} />
+                  )}
+                  {isDelayed && (
+                    <View style={[styles.liveDot, styles.delayedDot, isActive && styles.liveDotActive]} />
                   )}
                 </TouchableOpacity>
               );
@@ -256,6 +287,137 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Map Search Preference</Text>
+
+          <View style={styles.card}>
+            <Text style={[styles.label, { marginBottom: 12 }]}>Search Mode</Text>
+            <View style={styles.preferenceRow}>
+              <TouchableOpacity
+                style={[styles.preferenceTab, searchPreference === "state" && styles.preferenceTabActive]}
+                activeOpacity={0.8}
+                onPress={() => saveSearchPreference("state")}
+              >
+                <Text style={[styles.preferenceTabText, searchPreference === "state" && styles.preferenceTabTextActive]}>
+                  Select State
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.preferenceTab, searchPreference === "suburb" && styles.preferenceTabActive]}
+                activeOpacity={0.8}
+                onPress={() => saveSearchPreference("suburb")}
+              >
+                <Text style={[styles.preferenceTabText, searchPreference === "suburb" && styles.preferenceTabTextActive]}>
+                  Suburb / PIN
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Legal & Policies</Text>
+
+          <TouchableOpacity
+            style={[styles.card, styles.legalButton]}
+            activeOpacity={0.8}
+            onPress={() => setIsLegalModalVisible(true)}
+          >
+            <View style={styles.legalButtonContent}>
+              <Ionicons name="document-text-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.legalButtonText}>Terms of Use & Data Sources</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255, 255, 255, 0.4)" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Legal & Terms Modal */}
+        <Modal
+          visible={isLegalModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsLegalModalVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Terms of Use & Data Sources</Text>
+                <TouchableOpacity onPress={() => setIsLegalModalVisible(false)} style={styles.closeButton}>
+                  <Ionicons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.modalScrollView}
+                showsVerticalScrollIndicator={true}
+                contentContainerStyle={styles.modalScrollContent}
+              >
+                <Text style={styles.modalSectionTitle}>Data Sources & Freshness</Text>
+                <Text style={styles.modalParagraph}>
+                  Fuelioq aggregates fuel pricing information from official government databases and open data resources across Australia:
+                </Text>
+
+                <View style={styles.bulletRow}>
+                  <Text style={styles.bulletPoint}>•</Text>
+                  <Text style={styles.bulletText}>
+                    <Text style={styles.boldText}>New South Wales & ACT:</Text> Live price check data is retrieved directly from the NSW Government FuelCheck API.
+                  </Text>
+                </View>
+
+                <View style={styles.bulletRow}>
+                  <Text style={styles.bulletPoint}>•</Text>
+                  <Text style={styles.bulletText}>
+                    <Text style={styles.boldText}>Western Australia:</Text> Prices are fetched from the WA Government FuelWatch registry.
+                  </Text>
+                </View>
+
+                <View style={styles.bulletRow}>
+                  <Text style={styles.bulletPoint}>•</Text>
+                  <Text style={styles.bulletText}>
+                    <Text style={styles.boldText}>Queensland:</Text> Live rates are sourced from the QLD Government Fuel Prices database.
+                  </Text>
+                </View>
+
+                <View style={styles.bulletRow}>
+                  <Text style={styles.bulletPoint}>•</Text>
+                  <Text style={styles.bulletText}>
+                    <Text style={styles.boldText}>South Australia:</Text> Pricing is gathered from the SA Fuel Pricing Information service.
+                  </Text>
+                </View>
+
+                <View style={styles.bulletRow}>
+                  <Text style={styles.bulletPoint}>•</Text>
+                  <Text style={styles.bulletText}>
+                    <Text style={styles.boldText}>Victoria (VIC):</Text> Sourced from the Service Victoria Fair Fuel Open Data API. Note that in accordance with official Victorian government API guidelines, prices for Victoria have a mandatory <Text style={styles.highlightText}>24-hour delay</Text> and are not real-time.
+                  </Text>
+                </View>
+
+                <Text style={styles.modalSectionTitle}>Terms of Use</Text>
+
+                <Text style={styles.modalParagraph}>
+                  1. <Text style={styles.boldText}>Verify On Bowser:</Text> While we make every effort to display accurate and up-to-date data, fuel prices can fluctuate. Users must always verify the current price on the physical pump/bowser display at the service station before dispensing fuel.
+                </Text>
+
+                <Text style={styles.modalParagraph}>
+                  2. <Text style={styles.boldText}>Disclaimer of Liability:</Text> Fuelioq and its developers are not liable for any discrepancies between the prices displayed in the app and the actual retail prices at the service stations, nor for any decisions made based on this information.
+                </Text>
+
+                <Text style={styles.modalParagraph}>
+                  3. <Text style={styles.boldText}>Acceptance of Terms:</Text> By using the Fuelioq application, you acknowledge and agree to these conditions.
+                </Text>
+              </ScrollView>
+
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                activeOpacity={0.8}
+                onPress={() => setIsLegalModalVisible(false)}
+              >
+                <Text style={styles.modalCloseButtonText}>I Understand</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
 
 
@@ -378,6 +540,9 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: "#2ECC71",
+  },
+  delayedDot: {
+    backgroundColor: "#F39C12",
   },
   liveDotActive: {
     backgroundColor: "#131b26",
@@ -511,5 +676,141 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "rgba(255, 255, 255, 0.3)",
     fontWeight: "600",
-  }
+  },
+  legalButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  legalButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  legalButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    width: "100%",
+    maxHeight: "80%",
+    backgroundColor: "#1B2636",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    overflow: "hidden",
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.06)",
+    paddingBottom: 14,
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalScrollView: {
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
+  },
+  modalSectionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#45B2D3",
+    marginTop: 16,
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  modalParagraph: {
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.7)",
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  bulletRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 10,
+    paddingLeft: 4,
+  },
+  bulletPoint: {
+    fontSize: 14,
+    color: "#45B2D3",
+    marginRight: 8,
+    marginTop: -2,
+  },
+  bulletText: {
+    flex: 1,
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.7)",
+    lineHeight: 18,
+  },
+  boldText: {
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  highlightText: {
+    color: "#F39C12",
+    fontWeight: "700",
+  },
+  modalCloseButton: {
+    backgroundColor: "#45B2D3",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 14,
+  },
+  modalCloseButtonText: {
+    color: "#131b26",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  preferenceRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  preferenceTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+  },
+  preferenceTabActive: {
+    backgroundColor: "#45B2D3",
+  },
+  preferenceTabText: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  preferenceTabTextActive: {
+    color: "#131b26",
+    fontWeight: "700",
+  },
 });

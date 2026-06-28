@@ -8,9 +8,10 @@ import {
   Text,
   Platform,
   ScrollView,
+  TextInput,
 } from "react-native";
 import MapView from "react-native-map-clustering";
-import { PROVIDER_GOOGLE, Region, Marker } from "react-native-maps";
+import { PROVIDER_GOOGLE, Region, Marker, Polygon } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
@@ -18,6 +19,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import * as Location from "expo-location";
+import { useIsFocused } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Database & Components
 import { getStationsByState } from "../../lib/supabase";
@@ -101,7 +104,163 @@ export default function FuelMapScreen() {
   const [isStateDropdownOpen, setIsStateDropdownOpen] = useState(false);
   const stateDropdownHeight = useSharedValue(0);
 
-  const isUnavailableState = selectedState !== null && selectedState !== "NSW" && selectedState !== "WA" && selectedState !== "SA" && selectedState !== "QLD" && selectedState !== "ACT";
+  const [searchPreference, setSearchPreference] = useState<"state" | "suburb">("state");
+  const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
+  const [selectedSuburb, setSelectedSuburb] = useState<any | null>(null);
+  const [polygonCoords, setPolygonCoords] = useState<any[]>([]);
+  
+  const searchBarWidth = useSharedValue(60);
+  const isFocused = useIsFocused();
+  const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (isFocused) {
+      (async () => {
+        try {
+          const pref = await AsyncStorage.getItem("search_preference");
+          if (pref === "suburb" || pref === "state") {
+            setSearchPreference(pref);
+            if (pref === "state") {
+              setSelectedSuburb(null);
+              setPolygonCoords([]);
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to load search preference:", err);
+        }
+      })();
+    }
+  }, [isFocused]);
+
+  const animatedSearchContainerStyle = useAnimatedStyle(() => {
+    return {
+      width: withTiming(searchBarWidth.value, { duration: 350 }),
+      borderRadius: 16,
+      backgroundColor: "#FFFFFF",
+      height: 60,
+      position: "absolute",
+      right: 0,
+      top: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      overflow: "hidden",
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 5,
+      zIndex: 99,
+    };
+  });
+
+  const toggleSearch = () => {
+    if (isSearchBarOpen) {
+      searchBarWidth.value = 60;
+      setIsSearchBarOpen(false);
+      setSearchSuggestions([]);
+      inputRef.current?.blur();
+    } else {
+      searchBarWidth.value = width - 32;
+      setIsSearchBarOpen(true);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 350);
+    }
+  };
+
+  const handleSearchBtnPress = () => {
+    if (selectedSuburb) {
+      setSelectedSuburb(null);
+      setPolygonCoords([]);
+      const stateToUse = selectedState || "NSW";
+      if (mapRef.current && STATE_COORDINATES[stateToUse]) {
+        mapRef.current.animateToRegion(STATE_COORDINATES[stateToUse], 1000);
+      }
+    } else {
+      toggleSearch();
+    }
+  };
+
+  const handleSelectSuburb = async (suburb: any) => {
+    setSelectedSuburb(suburb);
+    setSearchQuery("");
+    setSearchSuggestions([]);
+    searchBarWidth.value = 60;
+    setIsSearchBarOpen(false);
+    inputRef.current?.blur();
+
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: parseFloat(suburb.lat),
+        longitude: parseFloat(suburb.lon),
+        latitudeDelta: 0.03,
+        longitudeDelta: 0.03,
+      }, 1000);
+    }
+
+    try {
+      const queryStr = `${suburb.suburb} ${suburb.postcode}, Australia`;
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryStr)}&polygon_geojson=1&format=json&limit=1`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data[0] && data[0].geojson) {
+          const geojson = data[0].geojson;
+          let coords: any[] = [];
+          if (geojson.type === "Polygon" && Array.isArray(geojson.coordinates) && Array.isArray(geojson.coordinates[0])) {
+            coords = geojson.coordinates[0].map((c: any) => ({
+              longitude: Number(c[0]),
+              latitude: Number(c[1])
+            })).filter((c: any) => !isNaN(c.longitude) && !isNaN(c.latitude));
+          } else if (geojson.type === "MultiPolygon" && Array.isArray(geojson.coordinates) && Array.isArray(geojson.coordinates[0]) && Array.isArray(geojson.coordinates[0][0])) {
+            coords = geojson.coordinates[0][0].map((c: any) => ({
+              longitude: Number(c[0]),
+              latitude: Number(c[1])
+            })).filter((c: any) => !isNaN(c.longitude) && !isNaN(c.latitude));
+          }
+          setPolygonCoords(coords);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed fetching boundary geojson:", err);
+    }
+  };
+
+  // Autocomplete fetch effect
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchSuggestions([]);
+      return;
+    }
+    const handler = setTimeout(async () => {
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}+Australia&format=json&addressdetails=1&limit=5`);
+        if (response.ok) {
+          const data = await response.json();
+          const formatted = data.map((item: any) => {
+            const addr = item.address || {};
+            const suburb = addr.suburb || addr.town || addr.city || addr.village || addr.suburb_district || "Unknown";
+            const postcode = addr.postcode || "";
+            return {
+              display_name: item.display_name,
+              suburb,
+              postcode,
+              lat: item.lat,
+              lon: item.lon
+            };
+          });
+          setSearchSuggestions(formatted);
+        }
+      } catch (err) {
+        console.warn("Autocomplete fetch failed:", err);
+      }
+    }, 400);
+
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  const isUnavailableState = selectedState !== null && selectedState !== "NSW" && selectedState !== "WA" && selectedState !== "SA" && selectedState !== "QLD" && selectedState !== "ACT" && selectedState !== "VIC";
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -305,12 +464,29 @@ export default function FuelMapScreen() {
         }}
       >
         {mapMarkers}
+        {polygonCoords.length > 0 && selectedSuburb && (
+          <Polygon
+            key={selectedSuburb.display_name}
+            coordinates={polygonCoords}
+            fillColor="rgba(69, 178, 211, 0.2)"
+            strokeColor="#45B2D3"
+            strokeWidth={2}
+            lineDashPattern={[4, 4]}
+          />
+        )}
       </MapView>
 
       {/* 2. Floating Modern Header Row */}
       <View style={[styles.headerOverlay, { top: insets.top + 10 }]} pointerEvents="box-none">
-        <View style={styles.headerRow}>
-          <TouchableOpacity activeOpacity={0.9} style={styles.fuelInfoPill} onPress={toggleDropdown}>
+        <View style={[styles.headerRow, { position: "relative" }]}>
+          <TouchableOpacity 
+            activeOpacity={0.9} 
+            style={[
+              styles.fuelInfoPill, 
+              searchPreference === "suburb" && { marginRight: 72 }
+            ]} 
+            onPress={toggleDropdown}
+          >
             <View style={styles.fuelIconContainer}>
               <MaterialCommunityIcons name="gas-station" size={20} color="#000" />
             </View>
@@ -320,11 +496,70 @@ export default function FuelMapScreen() {
             </View>
             <Ionicons name={isDropdownOpen ? "chevron-up" : "chevron-down"} size={20} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.statePickerButton} activeOpacity={0.9} onPress={toggleStateDropdown}>
-            <Text style={styles.statePickerText}>{selectedState || "..."}</Text>
-            <Ionicons name={isStateDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#131b26" />
-          </TouchableOpacity>
+          
+          {searchPreference === "suburb" ? (
+            <Animated.View style={animatedSearchContainerStyle}>
+              <View style={{ flex: 1, height: '100%', flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 60 }}>
+                <TextInput
+                  ref={inputRef}
+                  style={styles.slidingSearchInput}
+                  placeholder="Enter suburb or PIN code"
+                  placeholderTextColor="rgba(19,27,38,0.4)"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+              </View>
+
+              <TouchableOpacity 
+                style={{ 
+                  width: 60, 
+                  height: 60, 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  position: 'absolute',
+                  right: 0,
+                  top: 0
+                }} 
+                activeOpacity={0.9} 
+                onPress={handleSearchBtnPress}
+              >
+                <Ionicons 
+                  name={selectedSuburb ? "close-circle" : (isSearchBarOpen ? "close" : "search")} 
+                  size={22} 
+                  color="#131b26" 
+                />
+                {selectedSuburb && !isSearchBarOpen && (
+                  <View style={styles.blueBadgeDot} />
+                )}
+              </TouchableOpacity>
+            </Animated.View>
+          ) : (
+            <TouchableOpacity style={styles.statePickerButton} activeOpacity={0.9} onPress={toggleStateDropdown}>
+              <Text style={styles.statePickerText}>{selectedState || "..."}</Text>
+              <Ionicons name={isStateDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#131b26" />
+            </TouchableOpacity>
+          )}
         </View>
+
+        {/* Autocomplete Suggestions Dropdown */}
+        {searchPreference === "suburb" && isSearchBarOpen && searchSuggestions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+              {searchSuggestions.map((item, idx) => (
+                <TouchableOpacity 
+                  key={idx} 
+                  style={styles.suggestionItem} 
+                  onPress={() => handleSelectSuburb(item)}
+                >
+                  <Ionicons name="location-outline" size={16} color="#45B2D3" style={{ marginRight: 10 }} />
+                  <Text style={styles.suggestionText} numberOfLines={1}>
+                    {item.suburb}{item.postcode ? `, ${item.postcode}` : ""}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* 3. Animated Dropdown Menus */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', zIndex: 99 }}>
@@ -376,6 +611,22 @@ export default function FuelMapScreen() {
         station={selectedStation}
         onClose={() => setSelectedStation(null)}
       />
+
+      {selectedState === "VIC" && (
+        <TouchableOpacity
+          style={styles.warningFloatingButton}
+          onPress={() =>
+            showAlert({
+              type: "warning",
+              title: "VIC Price Info",
+              message: "Prices are updated with a 24-hour delay as per Victoria government API regulations.",
+            })
+          }
+          activeOpacity={0.8}
+        >
+          <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -451,4 +702,83 @@ const styles = StyleSheet.create({
   },
   dropdownText: { fontSize: 15, color: "#2C3E50", fontWeight: "500" },
   dropdownTextSelected: { color: "#45B2D3", fontWeight: "700" },
+  warningFloatingButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 110,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#F39C12",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#F39C12",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 98,
+  },
+  blueBadgeDot: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#45B2D3",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  slidingSearchContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "#1B2636",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    zIndex: 99,
+  },
+  slidingSearchInput: {
+    flex: 1,
+    color: "#131b26",
+    fontSize: 14,
+    fontWeight: "700",
+    height: "100%",
+  },
+  searchCloseBtn: {
+    padding: 4,
+  },
+  suggestionsContainer: {
+    backgroundColor: "#1B2636",
+    borderRadius: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  suggestionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.05)",
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: "#FFFFFF",
+    fontWeight: "500",
+  },
 });

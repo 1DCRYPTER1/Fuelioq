@@ -1,20 +1,20 @@
-import React, { useState, useEffect, useMemo } from "react";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  Dimensions,
-  Modal,
-  FlatList,
   ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { LineChart } from "react-native-gifted-charts";
-import { getStateAverages, getStateHistoryAverages } from "../../lib/supabase";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAlert } from "../../context/AlertContext";
+import { getStateAverages, getStateHistoryAverages } from "../../lib/supabase";
 
 const { width } = Dimensions.get("window");
 
@@ -59,7 +59,7 @@ export default function FuelScreen() {
   }, [selectedCity]);
 
   const isUnavailable = useMemo(() => {
-    return activeCityConfig.state !== "NSW" && activeCityConfig.state !== "WA" && activeCityConfig.state !== "SA" && activeCityConfig.state !== "QLD" && activeCityConfig.state !== "ACT";
+    return activeCityConfig.state !== "NSW" && activeCityConfig.state !== "WA" && activeCityConfig.state !== "SA" && activeCityConfig.state !== "QLD" && activeCityConfig.state !== "ACT" && activeCityConfig.state !== "VIC";
   }, [activeCityConfig.state]);
 
   // Fetch real-time averages from our database when selected state changes
@@ -127,7 +127,7 @@ export default function FuelScreen() {
   // Extract stats: average, min, max
   const stats = useMemo(() => {
     const defaultBase = BASE_PRICES[selectedFuel] || 175.0;
-    
+
     if (dbAverages && dbAverages[selectedFuel]) {
       return {
         average: dbAverages[selectedFuel].average,
@@ -345,6 +345,21 @@ export default function FuelScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+      {activeCityConfig.state === "VIC" && (
+        <TouchableOpacity
+          style={styles.warningFloatingButton}
+          onPress={() =>
+            showAlert({
+              type: "warning",
+              title: "VIC Price Info",
+              message: "Prices are updated with a 24-hour delay as per Victoria government API regulations.",
+            })
+          }
+          activeOpacity={0.8}
+        >
+          <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -572,5 +587,22 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     fontWeight: "500",
+  },
+  warningFloatingButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 110,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#F39C12",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#F39C12",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 8,
+    zIndex: 98,
   },
 });

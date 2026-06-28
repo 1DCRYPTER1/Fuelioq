@@ -100,28 +100,79 @@ async function diagnoseNetwork() {
   }
 }
 
+function parseEWKBPoint(hex: string) {
+  if (!hex || hex.length < 50) return { latitude: 0, longitude: 0 };
+  const littleEndian = hex.substring(0, 2) === '01';
+  const lonHex = hex.substring(18, 34);
+  const latHex = hex.substring(34, 50);
+
+  const hexToDouble = (h: string) => {
+    let bytes = [];
+    for (let i = 0; i < 16; i += 2) {
+      bytes.push(parseInt(h.substring(i, i + 2), 16));
+    }
+    if (littleEndian) {
+      bytes.reverse();
+    }
+    const buf = new ArrayBuffer(8);
+    const view = new DataView(buf);
+    bytes.forEach((b, i) => view.setUint8(i, b));
+    return view.getFloat64(0);
+  };
+
+  return {
+    longitude: hexToDouble(lonHex),
+    latitude: hexToDouble(latHex)
+  };
+}
+
 // Fetch all stations for a specific state instantly to allow the clustering engine to process them locally
 export async function getStationsByState(state: string) {
   try {
-    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/get_stations_by_state`, {
-      method: 'POST',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        state_name: state
-      })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Error fetching stations by state:", response.status, errorText);
-      return [];
+    let allStations: any[] = [];
+    let from = 0;
+    let limit = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const response = await fetch(`${supabaseUrl}/rest/v1/fuel_stations?state=eq.${state}`, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json',
+          'Range': `${from}-${from + limit - 1}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Error fetching stations by state:", response.status, errorText);
+        break;
+      }
+      
+      const stations = await response.json();
+      if (Array.isArray(stations) && stations.length > 0) {
+        allStations = allStations.concat(stations);
+        if (stations.length < limit) {
+          hasMore = false;
+        } else {
+          from += limit;
+        }
+      } else {
+        hasMore = false;
+      }
     }
     
-    const stations = await response.json();
-    return Array.isArray(stations) ? stations.map(normalizeStationPrices) : [];
+    const mapped = allStations.map(st => {
+      const coords = parseEWKBPoint(st.location);
+      return {
+        ...st,
+        latitude: coords.latitude,
+        longitude: coords.longitude
+      };
+    });
+
+    return mapped.map(normalizeStationPrices);
   } catch (error) {
     console.error("Error fetching stations by state:", error);
     diagnoseNetwork();
@@ -132,21 +183,42 @@ export async function getStationsByState(state: string) {
 // Fetch and calculate average, min, and max prices for all fuel types in a state from the database
 export async function getStateAverages(state: string) {
   try {
-    const response = await fetch(`${supabaseUrl}/rest/v1/fuel_stations?select=prices&state=eq.${state}`, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Content-Type': 'application/json'
-      }
-    });
+    let allData: any[] = [];
+    let from = 0;
+    let limit = 1000;
+    let hasMore = true;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Error fetching state averages:", response.status, errorText);
-      return null;
+    while (hasMore) {
+      const response = await fetch(`${supabaseUrl}/rest/v1/fuel_stations?select=prices&state=eq.${state}`, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json',
+          'Range': `${from}-${from + limit - 1}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Error fetching state averages:", response.status, errorText);
+        break;
+      }
+
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        allData = allData.concat(data);
+        if (data.length < limit) {
+          hasMore = false;
+        } else {
+          from += limit;
+        }
+      } else {
+        hasMore = false;
+      }
     }
 
-    const data = await response.json();
+    if (allData.length === 0) return null;
+    const data = allData;
     if (!data || !Array.isArray(data)) return null;
 
     const sums: Record<string, number> = {};
@@ -189,12 +261,47 @@ export async function getStateAverages(state: string) {
   }
 }
 
+export function getStateFuelTypeCode(state: string, fuelType: string): string {
+  const s = state.toUpperCase().trim();
+  const f = fuelType; // "U91", "U95", "U98", "Diesel", "Premium Diesel", "LPG"
+
+  if (s === "NSW" || s === "ACT" || s === "VIC") {
+    if (f === "U91") return "U91";
+    if (f === "U95") return "P95";
+    if (f === "U98") return "P98";
+    if (f === "Diesel") return s === "VIC" ? "DSL" : "DL";
+    if (f === "Premium Diesel") return s === "VIC" ? "PDSL" : "PDL";
+    if (f === "LPG") return "LPG";
+  }
+  
+  if (s === "QLD" || s === "SA") {
+    if (f === "U91") return "Unleaded";
+    if (f === "U95") return "Premium Unleaded 95";
+    if (f === "U98") return "Premium Unleaded 98";
+    if (f === "Diesel") return "Diesel";
+    if (f === "Premium Diesel") return "Premium Diesel";
+    if (f === "LPG") return "LPG";
+  }
+
+  if (s === "WA") {
+    if (f === "U91") return "U91";
+    if (f === "U95") return "U95";
+    if (f === "U98") return "U98";
+    if (f === "Diesel") return "Diesel";
+    if (f === "Premium Diesel") return "Premium Diesel";
+    if (f === "LPG") return "LPG";
+  }
+
+  return fuelType;
+}
+
 // Fetch the last 14 price history records for a station and fuel type
 export async function getStationPriceHistory(stationId: string, fuelType: string) {
   try {
-    const normType = normalizeFuelType(fuelType);
+    const state = stationId.split('_')[0] || "NSW";
+    const dbFuelType = getStateFuelTypeCode(state, fuelType);
     const response = await fetch(
-      `${supabaseUrl}/rest/v1/fuel_price_history?station_id=eq.${stationId}&fuel_type=eq.${normType}&order=recorded_at.desc&limit=14`,
+      `${supabaseUrl}/rest/v1/fuel_price_history?station_id=eq.${stationId}&fuel_type=eq.${dbFuelType}&order=recorded_at.desc&limit=14`,
       {
         method: 'GET',
         headers: {
@@ -222,7 +329,7 @@ export async function getStationPriceHistory(stationId: string, fuelType: string
 // Fetch the last 30 daily price averages for a state and fuel type via RPC
 export async function getStateHistoryAverages(state: string, fuelType: string) {
   try {
-    const normType = normalizeFuelType(fuelType);
+    const dbFuelType = getStateFuelTypeCode(state, fuelType);
     const response = await fetch(`${supabaseUrl}/rest/v1/rpc/get_state_history_averages`, {
       method: 'POST',
       headers: {
@@ -231,7 +338,7 @@ export async function getStateHistoryAverages(state: string, fuelType: string) {
       },
       body: JSON.stringify({
         state_code: state,
-        fuel_type_code: normType
+        fuel_type_code: dbFuelType
       })
     });
 

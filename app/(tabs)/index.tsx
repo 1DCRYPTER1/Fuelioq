@@ -111,6 +111,7 @@ export default function FuelMapScreen() {
   const [selectedSuburb, setSelectedSuburb] = useState<any | null>(null);
   const [polygonCoords, setPolygonCoords] = useState<any[]>([]);
   
+  const [mapRegion, setMapRegion] = useState<Region>(AUSTRALIA_BOUNDS);
   const searchBarWidth = useSharedValue(60);
   const isFocused = useIsFocused();
   const inputRef = useRef<TextInput>(null);
@@ -326,17 +327,43 @@ export default function FuelMapScreen() {
     })();
   }, []);
 
+  const logPerformanceStats = (phase: string) => {
+    const stats: any = {};
+    if (typeof global !== 'undefined' && (global as any).HermesInternal) {
+      const hermesStats = (global as any).HermesInternal.getInstrumentedStats();
+      // Log all keys to see what this specific engine version returns
+      console.log(`[Hermes Keys - ${phase}]`, Object.keys(hermesStats));
+      
+      const heapUsed = hermesStats['jsHeapUsedBytes'] || hermesStats['Hermes_AllocatedBytes'] || hermesStats['allocatedBytes'];
+      const heapSize = hermesStats['jsHeapSizeTotalBytes'] || hermesStats['Hermes_HeapSize'] || hermesStats['heapSize'];
+      if (heapUsed) stats.jsHeapUsedMB = (heapUsed / 1024 / 1024).toFixed(2) + ' MB';
+      if (heapSize) stats.jsHeapSizeMB = (heapSize / 1024 / 1024).toFixed(2) + ' MB';
+    } else {
+      stats.jsHeapUsedMB = 'N/A (Hermes disabled)';
+    }
+    console.log(`[Performance Log - ${phase}]`, JSON.stringify(stats));
+  };
+
   // Automatically fetch the entire state's data when the user switches states.
   // Uses active-flag cleanup to ensure out-of-order rapid responses don't corrupt state.
   useEffect(() => {
     if (!debouncedState) return;
     let active = true;
     (async () => {
+      const startTime = Date.now();
+      logPerformanceStats(`Start Fetching ${debouncedState}`);
       try {
         const data = await getStationsByState(debouncedState);
+        const fetchEndTime = Date.now();
         if (active) {
-          console.log(`Fetched ${data?.length || 0} stations for ${debouncedState}`);
+          console.log(`Fetched ${data?.length || 0} stations for ${debouncedState} in ${fetchEndTime - startTime}ms`);
+          
+          const beforeSetTime = Date.now();
           setStations(data || []);
+          const afterSetTime = Date.now();
+          
+          logPerformanceStats(`After Syncing ${debouncedState}`);
+          console.log(`[Performance Log - ${debouncedState}] State update took ${afterSetTime - beforeSetTime}ms. Total sync took ${afterSetTime - startTime}ms.`);
           
           if (data && data.length > 0) {
             showAlert({
@@ -409,33 +436,56 @@ export default function FuelMapScreen() {
 
   const mapMarkers = useMemo(() => {
     try {
-      return stations
-        .filter((station) => {
-          if (!station || !station.latitude || !station.longitude) return false;
-          if (debouncedFuel === "All fuels") return true;
-          if (!Array.isArray(station.prices)) return false;
-          return station.prices.some((p: any) => p && p.type === debouncedFuel && typeof p.value === 'number' && p.value > 0);
-        })
-        .map((station) => (
-          <Marker
-            key={station.id}
-            coordinate={{ latitude: parseFloat(station.latitude), longitude: parseFloat(station.longitude) }}
-            onPress={(e) => {
-              e.stopPropagation();
-              setSelectedStation(station);
-            }}
-          >
-            <FuelMarker
-              station={station}
-              selectedFuel={debouncedFuel}
-            />
-          </Marker>
-        ));
+      const isZoomedOut = mapRegion.longitudeDelta > 0.15;
+      
+      let filteredStations = stations.filter((station) => {
+        if (!station || !station.latitude || !station.longitude) return false;
+        if (debouncedFuel === "All fuels") return true;
+        if (!Array.isArray(station.prices)) return false;
+        return station.prices.some((p: any) => p && p.type === debouncedFuel && typeof p.value === 'number' && p.value > 0);
+      });
+
+      if (isZoomedOut) {
+        // Sort by cheapest of selected fuel or U91 fallback and limit to top 250 to prevent OOM crashes
+        filteredStations = filteredStations
+          .map(st => {
+            const prices = Array.isArray(st.prices) ? st.prices : [];
+            let priceVal = 9999;
+            if (debouncedFuel === "All fuels") {
+              const u91 = prices.find((p: any) => p && p.type === "U91" && typeof p.value === 'number' && p.value > 0);
+              priceVal = u91 ? u91.value : (prices[0] ? prices[0].value : 9999);
+            } else {
+              const matched = prices.find((p: any) => p && p.type === debouncedFuel && typeof p.value === 'number' && p.value > 0);
+              priceVal = matched ? matched.value : 9999;
+            }
+            return { st, priceVal };
+          })
+          .sort((a, b) => a.priceVal - b.priceVal)
+          .slice(0, 250)
+          .map(x => x.st);
+      }
+
+      return filteredStations.map((station) => (
+        <Marker
+          key={station.id}
+          coordinate={{ latitude: parseFloat(station.latitude), longitude: parseFloat(station.longitude) }}
+          onPress={(e) => {
+            e.stopPropagation();
+            setSelectedStation(station);
+          }}
+          tracksViewChanges={false}
+        >
+          <FuelMarker
+            station={station}
+            selectedFuel={debouncedFuel}
+          />
+        </Marker>
+      ));
     } catch (err) {
       console.error("[Map Screen Crash Logger] Failed generating map markers:", err);
       return [];
     }
-  }, [stations, debouncedFuel]);
+  }, [stations, debouncedFuel, mapRegion.longitudeDelta]);
 
   return (
     <View style={styles.container}>
@@ -457,6 +507,7 @@ export default function FuelMapScreen() {
         showsBuildings={false}
         showsTraffic={false}
         mapPadding={{ top: 0, right: 0, bottom: 85, left: 0 }}
+        onRegionChangeComplete={(r) => setMapRegion(r)}
         onPress={() => {
           setSelectedStation(null);
           if (isDropdownOpen) toggleDropdown();

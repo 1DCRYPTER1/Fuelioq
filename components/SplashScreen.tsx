@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
 interface Props {
@@ -27,11 +27,40 @@ export default function SplashScreen({ onFinish, duration = 4000 }: Props) {
     };
   });
 
+  const logoStyle = useAnimatedStyle(() => {
+    // Logo fades in and slides up in the first 25% of progress
+    const t = Math.min(progress.value / 0.25, 1);
+    return {
+      opacity: t,
+      transform: [
+        { translateY: 20 * (1 - t) },
+        { scale: 0.95 + t * 0.05 }
+      ],
+    };
+  });
+
+  const taglineStyle = useAnimatedStyle(() => {
+    // Tagline starts fading in after logo is 60% done (at 15% progress) and completes at 40%
+    const start = 0.15;
+    const end = 0.40;
+    const t = progress.value < start
+      ? 0
+      : progress.value > end
+        ? 1
+        : (progress.value - start) / (end - start);
+    return {
+      opacity: t,
+      transform: [
+        { translateY: 10 * (1 - t) }
+      ],
+    };
+  });
+
   return (
     <View style={styles.container}>
       <View style={styles.brandContainer}>
-        <Text style={styles.logoText}>Fuelioq</Text>
-        <Text style={styles.tagline}>LIVE AUSTRALIAN FUEL CYCLES</Text>
+        <Animated.Text style={[styles.logoText, logoStyle]}>Fuelioq</Animated.Text>
+        <Animated.Text style={[styles.tagline, taglineStyle]}>LIVE AUSTRALIAN FUEL CYCLES</Animated.Text>
       </View>
 
       <View style={styles.loaderContainer}>
@@ -55,6 +84,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   logoText: {
+    fontFamily: "Rondira-Medium",
     fontSize: 56,
     fontWeight: "900",
     color: "#FFFFFF",

@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { useFonts } from "expo-font";
 import SplashScreen from "../components/SplashScreen";
 import { AlertProvider } from "../context/AlertContext";
 import GlobalAlert from "../components/GlobalAlert";
@@ -17,8 +18,13 @@ Sentry.init({
 
 function RootLayout() {
   const [isReady, setIsReady] = useState(false);
+  const [fontsLoaded, fontError] = useFonts({
+    "Rondira-Medium": require("../assets/fonts/Rondira-Medium.otf"),
+    "SpaceMono": require("../assets/fonts/SpaceMono-Regular.ttf"),
+  });
 
-  if (!isReady) {
+  // Only transition off the splash screen when the animation is finished AND fonts have resolved
+  if (!isReady || (!fontsLoaded && !fontError)) {
     return <SplashScreen onFinish={() => setIsReady(true)} duration={4000} />;
   }
 
